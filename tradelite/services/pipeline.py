@@ -17,6 +17,7 @@ from ..models import Account, OrderRow, PositionRow, SignalRow, StrategyFitRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
 from . import presets, ranking
+from .alerts import Alert
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
