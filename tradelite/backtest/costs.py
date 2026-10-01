@@ -36,3 +36,5 @@ DELIVERY_EQUITY = CostModel()
 INTRADAY_EQUITY = CostModel(
     brokerage_pct=0.0003, brokerage_cap=20.0, stt_buy_pct=0.0, stt_sell_pct=0.00025, stamp_buy_pct=0.00003
 )
+# Exchange-traded funds (e.g. an index ETF used as a benchmark): no STT. Approximate; verify.
+ETF_DELIVERY = CostModel(stt_buy_pct=0.0, stt_sell_pct=0.0)

@@ -2,7 +2,7 @@ export type Verdict = "candidate" | "no_edge" | "insufficient_data";
 
 export type Rank = "proven" | "unproven";
 
-export interface Health { status: string; mode: string; broker: string; demo: boolean; database?: string; data_source?: string }
+export interface Health { status: string; mode: string; broker: string; demo: boolean; database?: string; data_source?: string; auth_required?: boolean }
 export interface AccountInfo {
   equity: number; cash: number; open_positions: number; exposure: number;
   realized_pnl_today: number; open_symbols: string[]; kill_switch: boolean; starting_capital: number;

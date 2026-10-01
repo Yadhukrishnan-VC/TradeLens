@@ -31,9 +31,35 @@ services:
       BROKER: paper
     volumes:
       - ./data:/app/data:ro          # optional: SYMBOL.csv files for `import-csv`
-    # The API has no login yet, so it is bound to this machine only. Do not expose it publicly.
+    # Token auth protects the API, but keep it bound to this machine; put HTTPS in front before exposing it.
     ports:
       - "127.0.0.1:8000:8000"
+
+  # Runs the daily job after market close on trading days. Same image, same database, no published port.
+  worker:
+    build: .
+    command: ["python", "-m", "tradelite", "worker"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tradelite:${POSTGRES_PASSWORD:-tradelite}@db:5432/tradelite
+      DATA_SOURCE: db
+      DATA_DIR: /app/data
+      TRADELITE_DEMO: ${TRADELITE_DEMO:-0}
+      TRADELITE_MODE: ${TRADELITE_MODE:-semi_auto}
+      STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
+      BROKER: paper
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      HEALTHCHECK_PING_URL: ${HEALTHCHECK_PING_URL:-}
+      DAILY_RUN_AT: ${DAILY_RUN_AT:-16:30}
+      HOLIDAYS_FILE: ${HOLIDAYS_FILE:-}
+      REFRESH_YEARS: ${REFRESH_YEARS:-5}
+    volumes:
+      - ./data:/app/data:ro          # put holidays.txt here and set HOLIDAYS_FILE=/app/data/holidays.txt
 
 volumes:
   pgdata:

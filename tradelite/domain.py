@@ -60,3 +60,5 @@ class AccountState:
     realized_pnl_today: float
     open_symbols: frozenset[str] = field(default_factory=frozenset)
     kill_switch: bool = False
+    unrealized_pnl: float = 0.0      # open positions marked to the latest close (net of nothing: entry costs are in equity)
+    unpriced_positions: int = 0      # open positions with no usable price; marked at entry (0 unrealized)
