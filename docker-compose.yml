@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradelite
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradelite}
+      POSTGRES_DB: tradelite
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradelite -d tradelite"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # not published to the host: only the app container can reach the database
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tradelite:${POSTGRES_PASSWORD:-tradelite}@db:5432/tradelite
+      DATA_SOURCE: db
+      DATA_DIR: /app/data
+      TRADELITE_DEMO: ${TRADELITE_DEMO:-0}
+      TRADELITE_MODE: ${TRADELITE_MODE:-semi_auto}
+      STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
+      BROKER: paper
+    volumes:
+      - ./data:/app/data:ro          # optional: SYMBOL.csv files for `import-csv`
+    # The API has no login yet, so it is bound to this machine only. Do not expose it publicly.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  pgdata:
