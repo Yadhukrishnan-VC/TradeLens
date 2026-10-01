@@ -92,3 +92,30 @@ test("track record, custom settings and data pages", async () => {
   expect(await screen.findByText("Fetch historical prices")).toBeTruthy();
   expect(await screen.findByText(/No prices stored yet/)).toBeTruthy();
 });
+
+test("live screener lists every strategy with entry, stop, target and reward-to-risk", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Screener" }));
+  expect(await screen.findByText("Live screener")).toBeTruthy();
+  // every strategy has its own section, matched or not
+  for (const name of ["ema_cross", "donchian_breakout", "ema_pullback", "macd_cross", "rsi_reversion", "bollinger_breakout", "new_high_momentum"]) {
+    expect(await screen.findByRole("heading", { name: new RegExp(`^${name}`) })).toBeTruthy();
+  }
+  const dc = (await screen.findByRole("heading", { name: /^donchian_breakout/ })).closest("section")!;
+  const row = (await within(dc).findByText("DEMO3")).closest("tr")!;
+  expect(within(row).getByText("₹250.00")).toBeTruthy();      // entry
+  expect(within(row).getByText("₹240.00")).toBeTruthy();      // stop loss
+  expect(within(row).getByText("₹300.00")).toBeTruthy();      // target
+  expect(within(row).getByText("1 : 5.0")).toBeTruthy();      // reward : risk
+  expect(within(row).getByText("12")).toBeTruthy();           // quantity for the account
+  expect(within(row).getByText("Proven")).toBeTruthy();
+  expect(within(row).getByText("Live, provisional")).toBeTruthy();
+  const ec = (await screen.findByRole("heading", { name: /^ema_cross/ })).closest("section")!;
+  expect(within(ec).getByText("Faded")).toBeTruthy();
+  expect(within(ec).getByText("The stop is too wide for your per-trade risk budget")).toBeTruthy();
+  expect(within(dc).queryByText(/No stock matches/)).toBeNull();
+  const empty = (await screen.findByRole("heading", { name: /^rsi_reversion/ })).closest("section")!;
+  expect(within(empty).getByText("No stock matches right now.")).toBeTruthy();
+  // demo mode has no live price source: the button is honestly disabled
+  expect((screen.getByRole("button", { name: "Check now" }) as HTMLButtonElement).disabled).toBe(true);
+});

@@ -22,7 +22,7 @@ Try it without any real data: `TRADELITE_DEMO=1 docker compose up --build` (synt
 ## Run it without Docker
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]" && pytest                # 64 tests
+pip install -e ".[dev]" && pytest                # 80 tests
 DATABASE_URL=postgresql://user:pass@localhost:5432/tradelite \
   uvicorn tradelite.api.main:create_app --factory --port 8000     # or leave DATABASE_URL unset for SQLite
 ```
@@ -55,6 +55,26 @@ When a scan creates a signal (and its order), it is matched against that record:
 stock is marked **Proven**, everything else **Unproven**. Proven signals are listed first, and in a scan they are routed first,
 so they get first claim on limited position slots and capital. Ranking never bypasses the risk engine, the kill switch or the
 approval step. It is a stability check on past data, not proof of future profit. Random data correctly produces no proven pairs.
+
+## Live screener
+The **Screener** page shows, for each strategy, which stocks match right now. During NSE hours (Mon-Fri 9:15-15:30 IST) a
+background loop checks every stored stock every 5 minutes (`LIVE_INTERVAL_SECONDS`, minimum 60) with free Yahoo intraday prices,
+builds today's bar so far, and runs the same strategy code the daily scan uses. Each match shows entry, stop loss, target,
+reward-to-risk, risk per share and the quantity your capital allows (or why it allows none).
+
+Read it as an early heads-up, not a trade signal:
+- A match is **provisional**. The bar is still forming and can fade before the close (shown as "Faded"). The confirmed signal
+  comes from the after-close scan and goes to the Desk for your approval. The screener never places orders.
+- Strategies were designed and backtested on daily closes. Volume-based rules compare partial-day volume with a full-day average,
+  so early in the day they fire less than they would at the close.
+- Yahoo intraday data for NSE is unofficial, may be delayed and can fail. Failures are shown on the page, never hidden.
+- Alerts are free: the dashboard (refreshes every 30s, plus optional browser notifications) and optional Telegram
+  (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). One alert per new match, not per check.
+- It screens only stocks you have fetched on the **Data** page.
+
+**1:5 reward-to-risk:** on **Track Record**, choose target 1:5 and *Test all strategies on all stocks*. This saves an `rr5` setting
+per strategy and backtests it separately, so you see which strategy and stock pairs actually hold up with a 5x target. The screener
+then also shows `rr5` matches, ranked Proven only where that pair passed. A 5x target is much harder to reach, so expect few.
 
 ## Real data
 Free source: Yahoo Finance via `yfinance` (split/dividend-adjusted daily bars, NSE symbols as `RELIANCE` -> `RELIANCE.NS`).

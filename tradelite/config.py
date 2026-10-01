@@ -13,6 +13,10 @@ class Settings:
     mode: str
     broker: str
     data_source: str = "db"   # db (prices in the database) | csv (files in data_dir)
+    live_screener: bool = True          # poll free intraday prices during NSE hours
+    live_interval: int = 300            # seconds between checks
+    telegram_token: str = ""            # optional free alerts via a Telegram bot
+    telegram_chat_id: str = ""
 
 
 def get_settings() -> Settings:
@@ -25,4 +29,8 @@ def get_settings() -> Settings:
         mode=os.getenv("TRADELITE_MODE", "semi_auto"),
         broker=os.getenv("BROKER", "paper"),
         data_source=os.getenv("DATA_SOURCE", "db"),
+        live_screener=os.getenv("LIVE_SCREENER", "1") == "1",
+        live_interval=max(60, int(os.getenv("LIVE_INTERVAL_SECONDS", "300"))),
+        telegram_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
     )

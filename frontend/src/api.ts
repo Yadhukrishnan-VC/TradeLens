@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   AccountInfo, BacktestResponse, BacktestRun, Fit, Health, OrderRow, PositionRow, RiskConfig,
-  ScanMode, SignalRow, StrategyConfig, StrategyInfo, TrackRecord, Coverage, FetchResult,
+  ScanMode, SignalRow, StrategyConfig, StrategyInfo, TrackRecord, Coverage, FetchResult, ScreenerData, ScreenerRun, BatchResult,
 } from "./types";
 
 export class ApiError extends Error {
@@ -60,6 +60,9 @@ export const api = {
   saveStrategyConfig: (b: { strategy: string; name: string; params: Record<string, number> }) => post<StrategyConfig>("/strategy-configs", b),
   deleteStrategyConfig: (id: number) => req<{ deleted: number }>(`/strategy-configs/${id}`, { method: "DELETE" }),
   trackRecord: () => req<TrackRecord>("/track-record"),
+  screener: () => req<ScreenerData>("/screener"),
+  runScreener: (force = false) => post<ScreenerRun>(`/screener/run?force=${force}`, {}),
+  backtestBatch: (b: { rr?: number }) => post<BatchResult>("/backtests/batch", b),
   coverage: () => req<Coverage[]>("/data/coverage"),
   fetchData: (b: { symbols?: string[]; years: number }) => post<FetchResult[]>("/data/fetch", b),
   scan: (b: { mode?: ScanMode; require_fit: boolean }) => post<SignalRow[]>("/scan", b),
