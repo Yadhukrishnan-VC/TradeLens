@@ -108,6 +108,51 @@ class StrategyFitRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class PortfolioRunRow(Base):
+    """One portfolio backtest: every strategy and symbol sharing a single account, plus the benchmark
+    comparison, the survivorship report and the equity curves."""
+    __tablename__ = "portfolio_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategies: Mapped[list] = mapped_column(JSON)
+    symbols: Mapped[list] = mapped_column(JSON)
+    capital: Mapped[float] = mapped_column(Float)
+    start: Mapped[datetime] = mapped_column(DateTime)
+    end: Mapped[datetime] = mapped_column(DateTime)
+    settings: Mapped[dict] = mapped_column(JSON)
+    metrics: Mapped[dict] = mapped_column(JSON)
+    by_strategy: Mapped[dict] = mapped_column(JSON)
+    comparison: Mapped[dict] = mapped_column(JSON)
+    survivorship: Mapped[dict] = mapped_column(JSON)
+    skipped: Mapped[dict] = mapped_column(JSON)
+    trades: Mapped[list] = mapped_column(JSON, default=list)
+    curves: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AlertRow(Base):
+    """Every alert tradelite wanted to send a human, kept whether or not a channel accepted it.
+    The message body is stored (not the destination), so no bot token or webhook URL is persisted."""
+    __tablename__ = "alerts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True)
+    level: Mapped[str] = mapped_column(String(10))          # info | warning | critical
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(String(4000), default="")
+    delivered: Mapped[bool] = mapped_column(default=False)  # did a real channel accept it?
+
+
+class JobRunRow(Base):
+    """History of the scheduled daily job: started/finished/status plus a JSON detail blob
+    (fetch results, skipped stale symbols, exits, scan counts, warnings)."""
+    __tablename__ = "job_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job: Mapped[str] = mapped_column(String(32), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="running")   # running | ok | failed
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class StrategyConfigRow(Base):
     """A user-customised parameter set for a strategy ("preset"). The built-in defaults are the
     implicit config named 'default'; presets are tested, ranked and scanned separately."""

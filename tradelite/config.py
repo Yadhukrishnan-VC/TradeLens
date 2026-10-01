@@ -15,8 +15,16 @@ class Settings:
     data_source: str = "db"   # db (prices in the database) | csv (files in data_dir)
     live_screener: bool = True          # poll free intraday prices during NSE hours
     live_interval: int = 300            # seconds between checks
-    telegram_token: str = ""            # optional free alerts via a Telegram bot
+    # Secrets: repr=False so they cannot leak into logs, /health or error messages.
+    api_token: str = field(default="", repr=False)            # shared bearer token; empty = auth OFF
+    telegram_bot_token: str = field(default="", repr=False)
     telegram_chat_id: str = ""
+    alert_webhook_url: str = field(default="", repr=False)
+    healthcheck_ping_url: str = field(default="", repr=False)
+    # Worker / daily job
+    daily_run_at: str = "16:30"          # IST, after the close
+    holidays_file: str = ""              # plain file in data_dir with YYYY-MM-DD per line
+    refresh_years: int = 5               # full history is re-downloaded every run
 
 
 def get_settings() -> Settings:
@@ -31,6 +39,12 @@ def get_settings() -> Settings:
         data_source=os.getenv("DATA_SOURCE", "db"),
         live_screener=os.getenv("LIVE_SCREENER", "1") == "1",
         live_interval=max(60, int(os.getenv("LIVE_INTERVAL_SECONDS", "300"))),
-        telegram_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        api_token=os.getenv("API_TOKEN", ""),
+        telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
+        alert_webhook_url=os.getenv("ALERT_WEBHOOK_URL", ""),
+        healthcheck_ping_url=os.getenv("HEALTHCHECK_PING_URL", ""),
+        daily_run_at=os.getenv("DAILY_RUN_AT", "16:30"),
+        holidays_file=os.getenv("HOLIDAYS_FILE", ""),
+        refresh_years=int(os.getenv("REFRESH_YEARS", "5")),
     )
