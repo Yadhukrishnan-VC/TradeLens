@@ -21,6 +21,22 @@ def main(argv: list[str] | None = None) -> int:
     bt.add_argument("--symbol", required=True)
     bt.add_argument("--capital", type=float, default=100_000.0)
     bt.add_argument("--demo", action="store_true", help="use synthetic data (plumbing only)")
+    pf = sub.add_parser("portfolio", help="portfolio backtest with benchmark comparison and survivorship report")
+    pf.add_argument("--strategies", help="comma-separated (default: all)")
+    pf.add_argument("--symbols", help="comma-separated (default: everything stored, or the universe file's members)")
+    pf.add_argument("--capital", type=float, default=100_000.0)
+    pf.add_argument("--start")
+    pf.add_argument("--end")
+    pf.add_argument("--benchmark", default="NIFTYBEES")
+    pf.add_argument("--universe-file", help="CSV with symbol,start,end membership history")
+    pf.add_argument("--liquid-top-n", type=int)
+    pf.add_argument("--risk-free", type=float, default=0.0, help="annual rate, e.g. 0.065")
+    pf.add_argument("--demo", action="store_true", help="synthetic data (plumbing only)")
+    sub.add_parser("worker", help="long-running scheduler: runs the daily job after market close on trading days")
+    rd = sub.add_parser("run-daily", help="run the daily job once now (refresh data, exits, scan, alerts)")
+    rd.add_argument("--no-fetch", action="store_true", help="skip the price refresh")
+    sub.add_parser("test-alert", help="send a test alert to every configured channel")
+    sub.add_parser("token", help="print a new random API token for API_TOKEN")
     ft = sub.add_parser("fetch", help="download daily history from a free provider into the database")
     ft.add_argument("--symbols", help="comma-separated NSE symbols (default: a liquid large-cap list)")
     ft.add_argument("--years", type=float, default=5.0)
@@ -41,6 +57,15 @@ def main(argv: list[str] | None = None) -> int:
         ok = sum(r["ok"] for r in results)
         print(f"{ok}/{len(results)} symbols stored")
         return 0 if ok else 1
+
+    if a.cmd == "portfolio":
+        return _portfolio(a)
+    if a.cmd == "token":
+        from .api.auth import new_token
+        print(new_token())
+        return 0
+    if a.cmd in ("worker", "run-daily", "test-alert"):
+        return _ops(a)
 
     if a.cmd == "strategies":
         for name, cls in sorted(registry.discover().items()):
@@ -67,4 +92,84 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  verdict: {fit['verdict']}  (stability check, not proof of edge)")
     if fit["skipped"]:
         print(f"  skipped signals: {fit['skipped']}")
+    return 0
+
+
+def _portfolio(a) -> int:
+    from pathlib import Path
+
+    from .risk.engine import RiskEngine
+    from .services import portfolio as svc
+
+    settings = get_settings()
+    if a.demo or settings.demo:
+        provider = DemoProvider()
+    elif settings.data_source == "csv":
+        provider = CsvProvider(settings.data_dir)
+    else:
+        from .data.db_provider import DbProvider
+        provider = DbProvider(make_session_factory(make_engine(settings.database_url)))
+    split = lambda v: [x.strip() for x in v.split(",") if x.strip()] if v else None  # noqa: E731
+    res, x = svc.run_portfolio(
+        provider, strategy_names=split(a.strategies), symbols=split(a.symbols), capital=a.capital, start=a.start,
+        end=a.end, benchmark=a.benchmark, universe_file=Path(a.universe_file) if a.universe_file else None,
+        liquid_top_n=a.liquid_top_n, risk=RiskEngine(), risk_free=a.risk_free)
+    f = lambda v, d=1: "n/a" if v is None else f"{v:,.{d}f}"  # noqa: E731
+    m = res.metrics
+    print(f"Portfolio {res.start.date()} -> {res.end.date()}  strategies={','.join(res.strategies)}  symbols={len(res.symbols)}")
+    print(f"  trades={m['n_trades']} win={f(m['win_rate'] and m['win_rate'] * 100, 0)}% pf={f(m['profit_factor'], 2)} "
+          f"costs={f(m['total_costs'], 0)} avg_exposure={f(m['avg_exposure_pct'], 0)}% max_open={m['max_open_positions']}")
+    print(f"  {'':22s}{'return%':>9s}{'CAGR%':>8s}{'maxDD%':>8s}{'Sharpe':>8s}")
+    rows = [("system", x["comparison"]["vs_benchmark"]["strategy"]),
+            (f"buy&hold {x['comparison']['benchmark_symbol']}", x["comparison"]["vs_benchmark"]["benchmark"]),
+            ("equal-weight universe", x["comparison"]["vs_equal_weight_universe"]["benchmark"])]
+    for label, st in rows:
+        print(f"  {label:22s}{f(st['total_return_pct']):>9s}{f(st['cagr_pct']):>8s}{f(st['max_drawdown_pct']):>8s}{f(st['sharpe'], 2):>8s}")
+    for key, label in (("vs_benchmark", "vs index"), ("vs_equal_weight_universe", "vs equal-weight")):
+        c = x["comparison"][key]
+        print(f"  {label}: {c['verdict']}  excess CAGR={f(c['excess_cagr_pct'])}%  beta={f(c['beta'], 2)}  alpha={f(c['alpha_annual_pct'])}%/yr")
+    sv = x["survivorship"]
+    print(f"  survivorship bias risk: {sv['bias_risk'].upper()}  (universe: {sv['universe']})")
+    for w in sv["warnings"]:
+        print(f"    ! {w}")
+    if res.skipped:
+        print(f"  skipped signals: {res.skipped}")
+    return 0
+
+
+def _ops(a) -> int:
+    import logging
+
+    from .broker.paper import PaperBroker
+    from .risk.engine import RiskEngine
+    from .services.alerts import Alert, build_notifier
+    from .services.jobs import run_daily, worker_loop
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    settings = get_settings()
+    if settings.broker != "paper":
+        raise SystemExit("Only BROKER=paper is implemented.")
+    sf = make_session_factory(make_engine(settings.database_url))
+    notifier = build_notifier(settings, sf)
+    if a.cmd == "test-alert":
+        ok = notifier.send(Alert("info", "Test alert", "If you can read this, alerts work."))
+        print("delivered to an external channel" if ok else "NOT delivered externally (check TELEGRAM_* / ALERT_WEBHOOK_URL); saved to the alerts table")
+        return 0 if ok else 1
+    if settings.demo:
+        provider = DemoProvider()
+    elif settings.data_source == "csv":
+        provider = CsvProvider(settings.data_dir)
+    else:
+        from .data.db_provider import DbProvider
+        provider = DbProvider(sf)
+    source = None if (settings.demo or settings.data_source != "db" or getattr(a, "no_fetch", False)) else get_source("yahoo")
+    risk, broker = RiskEngine(), PaperBroker()
+    if a.cmd == "run-daily":
+        res = run_daily(sf, settings, provider, broker, risk, notifier, source=source)
+        print(f"daily run {res['run_id']}: {res['status']}")
+        for k in ("fetch", "stale", "exits", "scan", "account", "warnings", "error"):
+            if res.get(k):
+                print(f"  {k}: {res[k]}")
+        return 0 if res["status"] == "ok" else 1
+    worker_loop(sf, settings, provider, broker, risk, notifier, source)
     return 0

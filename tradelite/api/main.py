@@ -37,6 +37,19 @@ class BacktestRequest(BaseModel):
     config_name: str = "default"
 
 
+class PortfolioRequest(BaseModel):
+    strategies: list[str] | None = None        # default: every registered strategy
+    symbols: list[str] | None = None           # default: everything stored (or the universe file's members)
+    capital: float = Field(100_000.0, gt=0)
+    start: str | None = None                   # YYYY-MM-DD; indicators still warm up on earlier data
+    end: str | None = None
+    benchmark: str = portfolio_svc.DEFAULT_BENCHMARK
+    universe_file: str | None = None           # plain file name inside DATA_DIR: symbol,start,end (membership history)
+    liquid_top_n: int | None = Field(None, ge=1)   # only trade the N most liquid symbols each day (prior data only)
+    slippage_bps: float = Field(5.0, ge=0)
+    risk_free: float = Field(0.0, ge=0, le=0.5)    # annual rate used for Sharpe / alpha
+
+
 class PresetRequest(BaseModel):
     strategy: str
     name: str
@@ -103,8 +116,7 @@ def create_app(
             yield s
 
     def pipe(s, mode: Mode | None = None, require_fit: bool = False) -> Pipeline:
-        return Pipeline(s, provider, broker, risk=risk, mode=mode or Mode(settings.mode),
-                        starting_capital=settings.starting_capital, require_fit=require_fit)
+        return build_pipeline(s, settings, provider, broker, risk, notifier, mode, require_fit)
 
     @app.exception_handler(FileNotFoundError)
     async def _nf(_, exc):  # noqa: ANN001
@@ -121,7 +133,8 @@ def create_app(
         with sf() as s:
             dialect = s.get_bind().dialect.name
         return {"status": "ok", "mode": settings.mode, "broker": settings.broker, "demo": settings.demo,
-                "database": dialect, "data_source": "demo" if settings.demo else settings.data_source}
+                "database": dialect, "data_source": "demo" if settings.demo else settings.data_source,
+                "auth_required": auth_on}
 
     @app.get("/symbols")
     def symbols():
@@ -156,6 +169,29 @@ def create_app(
     @app.get("/backtests/{run_id}")
     def get_backtest(run_id: int, s=Depends(session_dep)):
         r = s.get(BacktestRunRow, run_id)
+        if r is None:
+            raise HTTPException(404, "not found")
+        return _row(r)
+
+    @app.post("/portfolio-backtests")
+    def run_portfolio_backtest(req: PortfolioRequest, s=Depends(session_dep)):
+        try:
+            ufile = portfolio_svc.resolve_universe_file(settings.data_dir, req.universe_file) if req.universe_file else None
+            return portfolio_svc.run_and_store(
+                s, provider, strategy_names=req.strategies, symbols=req.symbols, capital=req.capital,
+                start=req.start, end=req.end, benchmark=req.benchmark, universe_file=ufile,
+                liquid_top_n=req.liquid_top_n, risk=risk, slippage_bps=req.slippage_bps, risk_free=req.risk_free)
+        except (KeyError, ValueError) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/portfolio-backtests")
+    def list_portfolio_backtests(s=Depends(session_dep)):
+        rows = s.scalars(select(PortfolioRunRow).order_by(PortfolioRunRow.id.desc()).limit(50)).all()
+        return [{k: v for k, v in _row(r).items() if k not in ("trades", "curves")} for r in rows]
+
+    @app.get("/portfolio-backtests/{run_id}")
+    def get_portfolio_backtest(run_id: int, s=Depends(session_dep)):
+        r = s.get(PortfolioRunRow, run_id)
         if r is None:
             raise HTTPException(404, "not found")
         return _row(r)
@@ -280,7 +316,18 @@ def create_app(
     @app.post("/kill-switch")
     def kill_switch(req: KillSwitchRequest, s=Depends(session_dep)):
         pipe(s).set_kill_switch(req.active)
+        notifier.send(Alert("warning", "Kill switch " + ("ON: no new trades" if req.active else "OFF: trading allowed again")))
         return {"kill_switch": req.active}
+
+    @app.get("/alerts")
+    def alerts(limit: int = 100, s=Depends(session_dep)):
+        rows = s.scalars(select(AlertRow).order_by(AlertRow.id.desc()).limit(max(1, min(limit, 500)))).all()
+        return [_row(r) for r in rows]
+
+    @app.get("/jobs")
+    def jobs(limit: int = 30, s=Depends(session_dep)):
+        rows = s.scalars(select(JobRunRow).order_by(JobRunRow.id.desc()).limit(max(1, min(limit, 200)))).all()
+        return [_row(r) for r in rows]
 
     dist = frontend_dist or Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if dist.exists():   # `npm run build` in frontend/ -> the dashboard is served at /ui/ by this same process

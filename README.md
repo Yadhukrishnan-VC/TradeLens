@@ -66,6 +66,62 @@ Prices are validated before they are stored (OHLC consistency, no NaN, no duplic
 `signal_only` records signals · `semi_auto` creates orders that wait for your approval · `auto` sends
 risk-approved orders to the broker. Stops/targets are always automatic via `POST /exits/check`.
 
+## Portfolio backtest, benchmark, survivorship
+
+The single-symbol backtest answers "does this rule work on this stock". The portfolio backtest answers
+"would this account have made money": all symbols and strategies share ONE account, compete for the position
+slots and capital of the same risk engine, and are judged against the market.
+
+```
+tradelite fetch --symbols NIFTYBEES              # the benchmark (a Nifty 50 ETF), stored like any symbol
+tradelite portfolio --benchmark NIFTYBEES --start 2021-01-01 --risk-free 0.065
+tradelite portfolio --liquid-top-n 15 --universe-file universe.csv
+```
+API: `POST /portfolio-backtests`, `GET /portfolio-backtests[/id]` (stored with trades and equity curves).
+
+* **Fills**: signal at the close, fill at the next open. When signals exceed free slots, the more liquid symbol
+  (trailing 20-day traded value) goes first, then strategy order, then name. No future data is used.
+* **Comparison**: the system vs buy-and-hold of the benchmark (costs and slippage paid) and vs a daily-rebalanced
+  equal-weight of the tradable universe. Reported: CAGR, max drawdown, Sharpe, beta, alpha, average time invested.
+  Verdicts: `beats_benchmark`, `better_risk_adjusted_only`, `underperforms`. A system that sits in cash 60% of the time
+  can show low CAGR and low drawdown; read return and risk together.
+* **Survivorship**: `--universe-file` takes `symbol,start,end` rows (end blank = still a member; a symbol may have several
+  rows). See `data/universe.example.csv`. Without it, every run says `bias_risk: HIGH`. `--liquid-top-n` picks
+  the most liquid names from prior data each day; it removes hindsight in *which* stocks, not in *which stocks are in the pool*.
+
+**Getting real membership history is on you.** The NSE index owner publishes constituent changes, and NSE's
+bhavcopy archive lists every traded security. Neither is wired in here, and free Yahoo data often
+does not serve delisted tickers: those show up as `missing_price_data` in the report. Until you have both the
+membership file and the prices for removed names, treat every result as an upper bound.
+
+## Running it every day: worker, alerts, auth
+
+```
+python -m tradelite token          # -> put it in .env as API_TOKEN (docker compose refuses to start without one)
+python -m tradelite test-alert     # after setting TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (and/or ALERT_WEBHOOK_URL)
+python -m tradelite run-daily      # one full pass by hand; `worker` does this on a schedule
+```
+`docker compose up` starts the API and a **worker**. On trading days at `DAILY_RUN_AT` (IST, default 16:30, after the close) it:
+refreshes prices -> refuses to trade on stale bars (a symbol without today's bar is skipped and reported; if none has one, the run
+FAILS instead of scanning old data) -> checks exits (frees slots) -> scans -> alerts. A failed run is retried after 15 minutes,
+three attempts in total, then a critical alert. Everything is idempotent, so retries and restarts cannot double-trade.
+
+* **Holidays**: put exchange holidays in a text file (`YYYY-MM-DD` per line, see `data/holidays.example.txt`) and set `HOLIDAYS_FILE`.
+  Nothing is hard-coded; without the file the worker treats a holiday as a trading day, finds no new bar, and raises the stale-data alert.
+* **Price refresh downloads the full history each day.** Yahoo prices are dividend/split adjusted; a corporate action rewrites all older bars,
+  so a partial refresh would splice two price scales together.
+* **Alerts** go to the log, the `alerts` table (`GET /alerts`) and, if configured, Telegram and/or a JSON webhook. You get: signals awaiting your
+  approval, stop/target exits, daily loss limit hit, kill switch flipped, stale data, run failed, and (critical) **an exit order the broker
+  refused, which leaves a position open**. A broken channel never stops trading code, and bot tokens are never logged.
+* **Dead-man's switch**: set `HEALTHCHECK_PING_URL` (e.g. a healthchecks.io check). It is pinged after each *successful* run, so if the worker
+  itself dies you hear about it from that service, not from silence. Run history: `GET /jobs`.
+* **Auth**: one shared secret in `API_TOKEN`, sent as `Authorization: Bearer ...` (the dashboard asks for it once and keeps it in the browser).
+  Everything except `/health` and the static dashboard files needs it, including `/docs`. Tokens under 24 characters are refused at startup.
+  With `API_TOKEN` empty auth is OFF (local development) and a warning is logged. This is a single-user gate, not accounts: keep the port on
+  127.0.0.1 and put HTTPS in front (reverse proxy) before exposing it, because a bearer token over plain HTTP can be read on the network.
+* **Equity is marked to market.** Open positions are valued at the latest close, so an open loss now shrinks new position sizes (before, only
+  closed P&L counted). A position with no price is marked at entry and reported as `unpriced_positions`. `GET /account` shows `unrealized_pnl`.
+
 ## Guarantees the tests enforce
 Fills at next bar open (no look-ahead) · stop beats target inside one bar · gaps fill at the open ·
 costs on both legs · backtest and live share the same RiskEngine and exit rule · re-scans never
@@ -73,4 +129,8 @@ duplicate orders · stale signals are rejected at approval · kill switch blocks
 
 ## Known limits (be honest with yourself)
 Daily bars, long-biased strategies, single account, equity-style costs (verify the rates against
-Zerodha's calculator), no auth on the API (localhost only), no options/forex data yet, the database schema is created on start (no migrations yet: a schema change needs a fresh database or a manual migration).
+Zerodha's calculator), single shared-token auth (no user accounts), no options/forex data yet, the database schema is created on start (no migrations yet: a schema change needs a fresh database or a manual migration).
+
+Portfolio backtest limits: default strategy parameters only (saved presets are not used yet); the daily loss limit
+uses the previous trading day's realized P&L (daily bars); positions in symbols whose data ends are closed at the last
+close, which flatters a collapse; parameter/strategy selection across many runs is not corrected for luck.

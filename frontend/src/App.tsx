@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { api, useLoad } from "./api";
+import { useEffect, useState } from "react";
+import { AUTH_EVENT, api, setToken, useLoad } from "./api";
 import { KillSwitch } from "./components/KillSwitch";
 import { Notice, type NoticeState } from "./components/Notice";
 import { RiskStrip } from "./components/RiskStrip";
@@ -13,7 +13,32 @@ import { Signals } from "./views/Signals";
 const VIEWS = ["Desk", "Backtests", "Track Record", "Signals", "Positions", "Data"] as const;
 type View = (typeof VIEWS)[number];
 
+function TokenGate() {
+  const [value, setValue] = useState("");
+  return (
+    <div className="app" style={{ display: "grid", placeItems: "center", minHeight: "100vh" }}>
+      <form onSubmit={(e) => { e.preventDefault(); setToken(value.trim()); window.location.reload(); }} style={{ display: "grid", gap: 12, width: 360 }}>
+        <div className="brand">tradelite</div>
+        <label htmlFor="tok">API token</label>
+        <input id="tok" type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} placeholder="the API_TOKEN from your .env" />
+        <button type="submit" className="nav active" disabled={value.trim().length === 0}>Unlock</button>
+        <p style={{ fontSize: 13 }}>Kept in this browser only. Generate one with <code>python -m tradelite token</code>.</p>
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
+  const [needsToken, setNeedsToken] = useState(false);
+  useEffect(() => {
+    const on = () => { setToken(""); setNeedsToken(true); };
+    window.addEventListener(AUTH_EVENT, on);
+    return () => window.removeEventListener(AUTH_EVENT, on);
+  }, []);
+  return needsToken ? <TokenGate /> : <Dashboard />;
+}
+
+function Dashboard() {
   const [view, setView] = useState<View>("Desk");
   const [refreshKey, setRefreshKey] = useState(0);
   const [banner, setBanner] = useState<NoticeState>(null);
