@@ -29,6 +29,10 @@ services:
       TRADELITE_MODE: ${TRADELITE_MODE:-semi_auto}
       STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
       BROKER: paper
+      LIVE_SCREENER: ${LIVE_SCREENER:-1}
+      LIVE_INTERVAL_SECONDS: ${LIVE_INTERVAL_SECONDS:-300}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     volumes:
       - ./data:/app/data:ro          # optional: SYMBOL.csv files for `import-csv`
     # Token auth protects the API, but keep it bound to this machine; put HTTPS in front before exposing it.

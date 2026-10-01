@@ -1,4 +1,6 @@
-import { api, useLoad } from "../api";
+import { useState } from "react";
+import { api, errText, useLoad } from "../api";
+import { Notice, type NoticeState } from "../components/Notice";
 import { Badge } from "../components/Badge";
 import { compact, day, ratio } from "../format";
 import type { TrackItem } from "../types";
@@ -6,13 +8,40 @@ import type { TrackItem } from "../types";
 const label = (t: TrackItem) => (t.config_name === "default" ? t.strategy : `${t.strategy} · ${t.config_name}`);
 const pf = (v: number | null, trades: number) => (v == null ? (trades ? "no losses" : "–") : ratio(v));
 
-export function TrackRecord({ refreshKey }: { refreshKey: number }) {
+export function TrackRecord({ refreshKey, onChange }: { refreshKey: number; onChange: () => void }) {
   const tr = useLoad(api.trackRecord, [refreshKey]);
+  const [rr, setRr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<NoticeState>(null);
+
+  async function testAll() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await api.backtestBatch(rr ? { rr: Number(rr) } : {});
+      setNotice({ tone: "ok", text: `Tested ${r.ran} strategy and stock pairs (${r.skipped} skipped). ${r.proven} proven${r.config_name === "default" ? "" : ` at settings "${r.config_name}"`}.` });
+    } catch (e) { setNotice({ tone: "bad", text: errText(e) }); } finally { setBusy(false); onChange(); }
+  }
   const proven = tr.data?.proven ?? [];
   const rest = tr.data?.not_proven ?? [];
 
   return (
     <>
+      <section className="block">
+        <h2>Build the track record</h2>
+        <p className="lede">Backtests every strategy on every stored stock in one go. Choose a reward-to-risk target to test that too: a 1:5 target
+          is far harder to reach than 1:2, so most pairs will not hold up at it. That is exactly what this test shows. Can take a few minutes.</p>
+        <div className="form-row">
+          <label>Target
+            <select value={rr} onChange={(e) => setRr(e.target.value)}>
+              <option value="">Each strategy's own</option><option value="2">1 : 2</option><option value="3">1 : 3</option><option value="5">1 : 5</option>
+            </select>
+          </label>
+          <button className="btn" onClick={testAll} disabled={busy}>{busy ? "Testing… this can take minutes" : "Test all strategies on all stocks"}</button>
+        </div>
+        <Notice notice={notice} onClose={() => setNotice(null)} />
+      </section>
+
       <section className="block">
         <h2>What worked, on which stock</h2>
         <p className="lede">

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -17,13 +19,17 @@ from ..config import Settings, get_settings
 from ..data.base import DataProvider, DataQualityError
 from ..data.csv_provider import CsvProvider
 from ..data.db_provider import DbProvider
+from ..data.live import LiveSource, YahooLive
 from ..data.sources import NIFTY_LARGE_CAPS, get_source
 from ..data.synthetic import DemoProvider
 from ..db import make_engine, make_session_factory
 from ..domain import Mode
-from ..models import BacktestRunRow, OrderRow, PositionRow, SignalRow, StrategyConfigRow, StrategyFitRow
+from ..models import (BacktestRunRow, LiveMatchRow, OrderRow, PositionRow, SignalRow, StrategyConfigRow,
+                      StrategyFitRow)
 from ..risk.engine import RiskEngine
 from ..services import backtests, ingest, presets
+from ..services.notify import NullNotifier, TelegramNotifier
+from ..services.screener import LiveScreener, ist_now
 from ..services.pipeline import Pipeline
 from ..strategies import registry
 
@@ -62,6 +68,12 @@ class FetchRequest(BaseModel):
     source: str = "yahoo"
 
 
+class BatchRequest(BaseModel):
+    strategies: list[str] | None = None
+    symbols: list[str] | None = None
+    rr: float | None = Field(None, gt=0, le=20)   # e.g. 5 -> tests every strategy with a 1:5 target (preset "rr5")
+
+
 class ScanRequest(BaseModel):
     symbols: list[str] | None = None
     strategies: list[str] | None = None
@@ -92,6 +104,10 @@ def create_app(
     session_factory=None,
     risk: RiskEngine | None = None,
     frontend_dist: Path | None = None,
+    live_source: LiveSource | None = None,
+    live_clock=None,
+    notifier=None,
+    start_live: bool = True,
 ) -> FastAPI:
     settings = settings or get_settings()
     if settings.broker != "paper":
@@ -107,7 +123,26 @@ def create_app(
     broker = broker or PaperBroker()
     risk = risk or RiskEngine()
 
-    app = FastAPI(title="tradelite", version="0.1.0")
+    if live_source is None and not settings.demo:
+        live_source = YahooLive()
+    if notifier is None:
+        notifier = (TelegramNotifier(settings.telegram_token, settings.telegram_chat_id)
+                    if settings.telegram_token and settings.telegram_chat_id else NullNotifier())
+
+    def _account_state(sess):
+        return Pipeline(sess, provider, broker, risk=risk, starting_capital=settings.starting_capital).account_state()
+
+    screener = LiveScreener(sf, provider, live_source, risk, _account_state, interval=settings.live_interval,
+                            notifier=notifier, clock=live_clock or ist_now, enabled=settings.live_screener)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        if start_live:
+            screener.start()      # polls only during NSE hours; a no-op in demo mode
+        yield
+        screener.stop()
+
+    app = FastAPI(title="tradelite", version="0.2.0", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
                        allow_methods=["*"], allow_headers=["*"])
 
@@ -248,6 +283,58 @@ def create_app(
         except KeyError as e:
             raise HTTPException(400, str(e).strip("'\"")) from e
         return ingest.fetch_symbols(sf, src, req.symbols or NIFTY_LARGE_CAPS, req.years)
+
+    @app.post("/backtests/batch")
+    def backtest_batch(req: BatchRequest, s=Depends(session_dep)):
+        """Backtest strategies on stocks in one go to build the track record. With `rr`, first saves an
+        'rr<N>' preset per strategy (same settings, target = N x risk) and tests that. Can take minutes."""
+        catalog = registry.discover()
+        names = req.strategies or sorted(catalog)
+        unknown = [n for n in names if n not in catalog]
+        if unknown:
+            raise HTTPException(400, f"unknown strategies: {unknown}")
+        config = f"rr{req.rr:g}" if req.rr else "default"
+        ran = skipped = proven = 0
+        problems: list[str] = []
+        for name in names:
+            if req.rr:
+                presets.save(s, name, config, {"rr": req.rr})
+            for sym in req.symbols or provider.symbols():
+                try:
+                    out = backtests.run_and_store(s, provider, name, sym, risk=risk, config_name=config)
+                    ran += 1
+                    proven += out["verdict"] == "candidate"
+                except (KeyError, ValueError, FileNotFoundError, DataQualityError) as e:
+                    skipped += 1
+                    if len(problems) < 5:
+                        problems.append(f"{name} on {sym}: {str(e)[:100]}")
+        return {"config_name": config, "ran": ran, "skipped": skipped, "proven": proven, "problems": problems}
+
+    @app.get("/screener")
+    def screener_view(s=Depends(session_dep)):
+        """Today's live matches grouped by strategy (every strategy is listed, matched or not)."""
+        today = screener.clock().date()
+        rows = s.scalars(select(LiveMatchRow).where(LiveMatchRow.trading_day == today)).all()
+        confirmed = {(r.strategy, r.config_name, r.symbol) for r in s.scalars(
+            select(SignalRow).where(SignalRow.ts >= datetime.combine(today, datetime.min.time()))).all()}
+        by_strategy: dict[str, list[dict]] = {}
+        for r in sorted(rows, key=lambda r: (r.status != "live", r.rank != "proven", -r.rank_score, r.first_seen)):
+            risk_ps = abs(r.entry - r.stop)
+            by_strategy.setdefault(r.strategy, []).append({
+                **_row(r), "risk_per_share": risk_ps,
+                "confirmed": (r.strategy, r.config_name, r.symbol) in confirmed})
+        return {"status": screener.status(), "strategies": [
+            {"name": name, "description": cls.meta.description, "matches": by_strategy.get(name, [])}
+            for name, cls in sorted(registry.discover().items())]}
+
+    @app.get("/screener/status")
+    def screener_status():
+        return screener.status()
+
+    @app.post("/screener/run")
+    def screener_run(force: bool = False):
+        """Check now. Outside market hours this does nothing unless force=true (useful for testing)."""
+        return screener.run_once(force=force)
 
     @app.get("/fits")
     def fits(s=Depends(session_dep)):
