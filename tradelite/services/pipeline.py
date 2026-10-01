@@ -16,7 +16,7 @@ from ..exits import check_exit
 from ..models import Account, OrderRow, PositionRow, SignalRow, StrategyFitRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
-from . import presets
+from . import presets, ranking
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -110,13 +110,7 @@ class Pipeline:
         return created
 
     def rank_for(self, strategy: str, config_name: str, symbol: str, timeframe: str = "1d") -> tuple[str, float]:
-        """'proven' iff this exact strategy+config previously passed the stability check on this symbol."""
-        fit = self.s.scalar(select(StrategyFitRow).where(
-            StrategyFitRow.strategy == strategy, StrategyFitRow.config_name == config_name,
-            StrategyFitRow.symbol == symbol, StrategyFitRow.timeframe == timeframe))
-        if fit is None or fit.verdict != "candidate":
-            return "unproven", 0.0
-        return "proven", float(fit.profit_factor) if fit.profit_factor is not None else 99.0
+        return ranking.rank_for(self.s, strategy, config_name, symbol, timeframe)
 
     def _store_signal(self, sig: Signal, config_name: str = "default", rank: str = "unproven",
                       score: float = 0.0) -> SignalRow | None:

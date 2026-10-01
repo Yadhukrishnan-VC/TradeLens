@@ -4,7 +4,8 @@ from datetime import datetime
 
 from tradelite.data.synthetic import make_bars
 from tradelite.db import make_engine, make_session_factory
-from tradelite.models import OrderRow, SignalRow, StrategyFitRow
+from tradelite.models import LiveMatchRow, OrderRow, SignalRow, StrategyFitRow
+from tradelite.services.screener import ist_now
 
 url = sys.argv[1] if len(sys.argv) > 1 else "sqlite:///e2e.db"
 df = make_bars("DEMO1")
@@ -17,6 +18,13 @@ with make_session_factory(make_engine(url))() as s:
     s.add(OrderRow(signal_id=sig.id, symbol="DEMO1", side="BUY", qty=10, status="PENDING_APPROVAL",
                    mode="semi_auto", tag="e2e-seed-0001", rank="proven", rank_score=1.8, created_at=datetime.now()))
     # a pair that "worked": shows up in the Track Record view (macd_cross on DEMO2 is not touched by the UI test)
+    now = ist_now()
+    s.add(LiveMatchRow(strategy="donchian_breakout", config_name="default", symbol="DEMO3", trading_day=now.date(),
+                       status="live", side="BUY", entry=250.0, stop=240.0, target=300.0, rr=5.0, rank="proven", rank_score=1.9,
+                       suggested_qty=12, fit="OK", first_seen=now, last_seen=now))
+    s.add(LiveMatchRow(strategy="ema_cross", config_name="default", symbol="DEMO2", trading_day=now.date(),
+                       status="faded", side="BUY", entry=100.0, stop=95.0, target=110.0, rr=2.0, rank="unproven", rank_score=0.0,
+                       suggested_qty=0, fit="SIZE_ZERO_RISK_BUDGET", first_seen=now, last_seen=now))
     s.add(StrategyFitRow(strategy="macd_cross", config_name="default", symbol="DEMO2", timeframe="1d",
                          start=datetime(2018, 1, 1), end=datetime(2023, 9, 1), n_bars=1500, avg_volume=4.4e5,
                          n_trades=41, profit_factor=1.7, expectancy=120.0, verdict="candidate",

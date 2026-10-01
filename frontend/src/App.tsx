@@ -8,9 +8,10 @@ import { Data } from "./views/Data";
 import { TrackRecord } from "./views/TrackRecord";
 import { Desk } from "./views/Desk";
 import { Positions } from "./views/Positions";
+import { Screener } from "./views/Screener";
 import { Signals } from "./views/Signals";
 
-const VIEWS = ["Desk", "Backtests", "Track Record", "Signals", "Positions", "Data"] as const;
+const VIEWS = ["Desk", "Screener", "Backtests", "Track Record", "Signals", "Positions", "Data"] as const;
 type View = (typeof VIEWS)[number];
 
 export default function App() {
@@ -53,7 +54,8 @@ export default function App() {
         <h1 className="page-title">{view}</h1>
         {view === "Desk" && <Desk refreshKey={refreshKey} onChange={bump} />}
         {view === "Backtests" && <Backtests refreshKey={refreshKey} onChange={bump} />}
-        {view === "Track Record" && <TrackRecord refreshKey={refreshKey} />}
+        {view === "Screener" && <Screener refreshKey={refreshKey} />}
+        {view === "Track Record" && <TrackRecord refreshKey={refreshKey} onChange={bump} />}
         {view === "Signals" && <Signals refreshKey={refreshKey} onChange={bump} serverMode={health.data?.mode ?? "semi_auto"} />}
         {view === "Positions" && <Positions refreshKey={refreshKey} onChange={bump} />}
         {view === "Data" && <Data refreshKey={refreshKey} onChange={bump} />}
