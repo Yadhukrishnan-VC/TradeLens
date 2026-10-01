@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -131,3 +131,27 @@ class PriceBarRow(Base):
     close: Mapped[float] = mapped_column(Float)
     volume: Mapped[float] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String(16), default="csv")
+
+
+class LiveMatchRow(Base):
+    """A strategy that matches a stock RIGHT NOW on today's in-progress bar. Provisional: the bar can
+    still change until the close, so a match may 'fade'. Never creates orders by itself."""
+    __tablename__ = "live_matches"
+    __table_args__ = (UniqueConstraint("strategy", "config_name", "symbol", "trading_day"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy: Mapped[str] = mapped_column(String(64), index=True)
+    config_name: Mapped[str] = mapped_column(String(64), default="default")
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    trading_day: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(10), default="live")     # live | faded
+    side: Mapped[str] = mapped_column(String(4))
+    entry: Mapped[float] = mapped_column(Float)
+    stop: Mapped[float] = mapped_column(Float)
+    target: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rank: Mapped[str] = mapped_column(String(10), default="unproven")
+    rank_score: Mapped[float] = mapped_column(Float, default=0.0)
+    suggested_qty: Mapped[int] = mapped_column(Integer, default=0)
+    fit: Mapped[str] = mapped_column(String(32), default="OK")          # risk-engine verdict for YOUR capital
+    first_seen: Mapped[datetime] = mapped_column(DateTime)
+    last_seen: Mapped[datetime] = mapped_column(DateTime)

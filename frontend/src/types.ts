@@ -63,3 +63,19 @@ export interface TrackItem {
 export interface TrackRecord { proven: TrackItem[]; not_proven: TrackItem[] }
 export interface Coverage { symbol: string; bars: number; start: string; end: string }
 export interface FetchResult { symbol: string; ok: boolean; bars?: number; start?: string; end?: string; error?: string }
+
+export interface LiveMatch {
+  id: number; strategy: string; config_name: string; symbol: string; status: "live" | "faded"; side: string;
+  entry: number; stop: number; target: number | null; rr: number | null; risk_per_share: number;
+  rank: Rank; rank_score: number; suggested_qty: number; fit: string; confirmed: boolean;
+  first_seen: string; last_seen: string;
+}
+export interface ScreenerStrategy { name: string; description: string; matches: LiveMatch[] }
+export interface ScreenerStatus {
+  enabled: boolean; market_open: boolean; now_ist: string; interval_seconds: number; last_run: string | null;
+  last_result: { symbols: number; priced: number; matches: number; new: number; faded: number; errors: string[] } | null;
+  telegram: boolean; source: string | null;
+}
+export interface ScreenerData { status: ScreenerStatus; strategies: ScreenerStrategy[] }
+export interface ScreenerRun { ran: boolean; reason?: string; priced?: number; new?: number; errors?: string[] }
+export interface BatchResult { config_name: string; ran: number; skipped: number; proven: number; problems: string[] }
