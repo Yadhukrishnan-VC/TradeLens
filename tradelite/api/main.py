@@ -24,14 +24,16 @@ from ..data.sources import NIFTY_LARGE_CAPS, get_source
 from ..data.synthetic import DemoProvider
 from ..db import make_engine, make_session_factory
 from ..domain import Mode
-from ..models import (BacktestRunRow, LiveMatchRow, OrderRow, PositionRow, SignalRow, StrategyConfigRow,
-                      StrategyFitRow)
+from ..models import (AlertRow, BacktestRunRow, JobRunRow, LiveMatchRow, OrderRow, PortfolioRunRow, PositionRow,
+                      SignalRow, StrategyConfigRow, StrategyFitRow)
 from ..risk.engine import RiskEngine
-from ..services import backtests, ingest, presets
-from ..services.notify import NullNotifier, TelegramNotifier
+from ..services import backtests, ingest, portfolio as portfolio_svc, presets
+from ..services.alerts import Alert, build_notifier
+from ..services.jobs import build_pipeline
 from ..services.screener import LiveScreener, ist_now
 from ..services.pipeline import Pipeline
 from ..strategies import registry
+from .auth import install_auth
 
 
 class BacktestRequest(BaseModel):
@@ -126,8 +128,8 @@ def create_app(
     if live_source is None and not settings.demo:
         live_source = YahooLive()
     if notifier is None:
-        notifier = (TelegramNotifier(settings.telegram_token, settings.telegram_chat_id)
-                    if settings.telegram_token and settings.telegram_chat_id else NullNotifier())
+        # Alerts go to the log plus any configured channel, and are always stored so GET /alerts works.
+        notifier = build_notifier(settings, sf)
 
     def _account_state(sess):
         return Pipeline(sess, provider, broker, risk=risk, starting_capital=settings.starting_capital).account_state()
@@ -143,6 +145,8 @@ def create_app(
         screener.stop()
 
     app = FastAPI(title="tradelite", version="0.2.0", lifespan=lifespan)
+    # Auth BEFORE CORS: CORS is added last, so it stays the outermost layer and answers preflight without a token.
+    auth_on = install_auth(app, settings.api_token)
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
                        allow_methods=["*"], allow_headers=["*"])
 
