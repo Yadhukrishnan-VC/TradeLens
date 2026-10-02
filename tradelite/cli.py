@@ -42,7 +42,31 @@ def main(argv: list[str] | None = None) -> int:
     ft.add_argument("--years", type=float, default=5.0)
     ft.add_argument("--source", default="yahoo")
     sub.add_parser("import-csv", help="load SYMBOL.csv files from DATA_DIR into the database")
+    ie = sub.add_parser("import-events", help="load an event calendar CSV (symbol,date,kind[,note]); symbol * = whole market")
+    ie.add_argument("file")
+    fe = sub.add_parser("fetch-events", help="best effort: pull upcoming earnings dates for stored stocks from Yahoo")
+    fe.add_argument("--symbols", help="comma-separated (default: every stored stock)")
     a = ap.parse_args(argv)
+
+    if a.cmd in ("import-events", "fetch-events"):
+        from .data.db_provider import DbProvider
+        from .services import events
+        settings = get_settings()
+        sf = make_session_factory(make_engine(settings.database_url))
+        with sf() as s:
+            if a.cmd == "import-events":
+                with open(a.file, encoding="utf-8") as fh:
+                    res = events.import_csv(s, fh.read())
+                for problem in res["problems"]:
+                    print("  skipped", problem)
+                print(f"{res['imported']} event(s) imported")
+                return 0 if res["imported"] or not res["problems"] else 1
+            syms = [x.strip().upper() for x in a.symbols.split(",")] if a.symbols else DbProvider(sf).symbols()
+            out = events.fetch_earnings(s, [x for x in syms if x != settings.benchmark_symbol])
+        for r in out:
+            print(f"  {r['symbol']:14s} " + (f"{r['events']} upcoming earnings date(s)" if r["ok"] else f"FAILED: {r['error']}"))
+        print(f"{sum(r['ok'] for r in out)}/{len(out)} symbols looked up. Yahoo's calendar is patchy for NSE: no date does not mean no event.")
+        return 0
 
     if a.cmd in ("fetch", "import-csv"):
         settings = get_settings()

@@ -28,7 +28,15 @@ const REASONS: Record<string, string> = {
   STALE_SIGNAL: "A newer bar has arrived, so this signal is out of date",
   USER_REJECTED: "You rejected it",
   BROKER_REJECTED: "The broker rejected the order",
+  DATA_QUALITY: "The price data behind it is not trustworthy",
+  NOT_ACTIVE: "This strategy is not switched on yet",
+  NOT_VALIDATED: "It has not passed the stability check on this stock",
+  STALE_VALIDATION: "Its last passing test is too old to rely on",
+  EVENT_RISK: "Results or another event are due within days",
+  OFF_REGIME: "The market is not in the regime this strategy is made for",
   stop: "Stop hit", stop_gap: "Gapped through the stop", target: "Target hit",
   target_gap: "Gapped past the target", end_of_data: "Closed at end of data",
 };
 export const reasonText = (code: string | null | undefined) => (code ? REASONS[code] ?? code : "");
+
+export const reasonList = (codes: string | null | undefined) => (codes ?? "").split(",").filter(Boolean).map((c) => reasonText(c)).join("; ");

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, errText, useLoad } from "../api";
 import { compact, day } from "../format";
 import { Notice, type NoticeState } from "../components/Notice";
-import type { FetchResult } from "../types";
+import type { EventItem, FetchResult } from "../types";
 
 export function Data({ refreshKey, onChange }: { refreshKey: number; onChange: () => void }) {
   const coverage = useLoad(api.coverage, [refreshKey]);
@@ -62,6 +62,62 @@ export function Data({ refreshKey, onChange }: { refreshKey: number; onChange: (
           </table></div>
         )}
       </section>
+      <Events refreshKey={refreshKey} onChange={onChange} />
     </>
+  );
+}
+
+function Events({ refreshKey, onChange }: { refreshKey: number; onChange: () => void }) {
+  const list = useLoad(api.events, [refreshKey]);
+  const [symbol, setSymbol] = useState("");
+  const [dayValue, setDayValue] = useState("");
+  const [kind, setKind] = useState("earnings");
+  const [csv, setCsv] = useState("");
+  const [notice, setNotice] = useState<NoticeState>(null);
+
+  async function add() {
+    try {
+      await api.addEvent({ symbol: symbol.trim() || "*", day: dayValue, kind });
+      setSymbol(""); setNotice(null); list.reload(); onChange();
+    } catch (e) { setNotice({ tone: "bad", text: errText(e) }); }
+  }
+  async function importCsv() {
+    try {
+      const r = await api.importEvents(csv);
+      setNotice({ tone: r.problems.length ? "bad" : "ok", text: `${r.imported} imported${r.problems.length ? `. Skipped: ${r.problems.join("; ")}` : "."}` });
+      setCsv(""); list.reload(); onChange();
+    } catch (e) { setNotice({ tone: "bad", text: errText(e) }); }
+  }
+  async function remove(e: EventItem) {
+    try { await api.deleteEvent(e.id); list.reload(); onChange(); } catch (err) { setNotice({ tone: "bad", text: errText(err) }); }
+  }
+
+  return (
+    <section className="block">
+      <h2>Event calendar</h2>
+      <p className="lede">Results, board meetings or policy days make a new trade riskier: a breakout the day before results is a coin flip with a gap
+        attached. A signal with an event within a couple of days is flagged, and held back when the gate is enforcing. Use symbol <code>*</code> for the whole market.
+        Free lookups are patchy, so an empty calendar does not mean no events. Add the ones you know.</p>
+      <div className="form-row">
+        <label>Symbol (or * for all)<input type="text" value={symbol} placeholder="TCS" onChange={(e) => setSymbol(e.target.value)} /></label>
+        <label>Date<input type="date" value={dayValue} onChange={(e) => setDayValue(e.target.value)} /></label>
+        <label>Kind<input type="text" value={kind} onChange={(e) => setKind(e.target.value)} /></label>
+        <button className="btn" onClick={add} disabled={!dayValue}>Add event</button>
+      </div>
+      <details>
+        <summary>Import a CSV (symbol,date,kind,note)</summary>
+        <textarea rows={4} style={{ width: "100%" }} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder={"TCS,2026-10-09,earnings\n*,2026-12-05,policy"} />
+        <button className="btn ghost" onClick={importCsv} disabled={!csv.trim()}>Import</button>
+      </details>
+      <Notice notice={notice} onClose={() => setNotice(null)} />
+      {(list.data ?? []).length === 0 ? <p className="empty">No upcoming events.</p> : (
+        <div className="scroll"><table className="compact">
+          <thead><tr><th>Date</th><th>Symbol</th><th>Kind</th><th>Source</th><th /></tr></thead>
+          <tbody>{(list.data ?? []).map((e) => (
+            <tr key={e.id}><td>{day(e.day)}</td><td><strong>{e.symbol === "*" ? "Whole market" : e.symbol}</strong></td><td>{e.kind}</td><td className="muted">{e.source}</td>
+              <td><button className="btn ghost" onClick={() => remove(e)}>Remove</button></td></tr>))}</tbody>
+        </table></div>
+      )}
+    </section>
   );
 }
