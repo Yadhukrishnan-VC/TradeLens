@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,7 +10,7 @@ from sqlalchemy import select
 from ..backtest.costs import CostModel
 from ..backtest.engine import evaluate_fit
 from ..data.base import DataProvider
-from ..models import TrialsRow, StrategyFitRow
+from ..models import BacktestRunRow, TrialsRow, StrategyFitRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
 from . import presets
@@ -19,7 +20,11 @@ def _params_hash(params: dict[str, Any] | None) -> str:
     """Deterministic hash of params dict for trials tracking."""
     if params is None:
         return hashlib.sha256(b"default").hexdigest()
-    return hashlib.sha256(str(sorted(params.items()))).hexdigest()
+    try:
+        return hashlib.sha256(str(sorted(params.items()))).hexdigest()
+    except TypeError:
+        # params contains unhashable values; use repr as fallback
+        return hashlib.sha256(repr(params).encode()).hexdigest()
 
 
 def run_and_store(

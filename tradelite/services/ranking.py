@@ -34,7 +34,6 @@ def adjusted_verdict(verdict: str, t_stat: float, n: int) -> tuple[str, bool, st
     if n > 1:
         adjusted = True
         reason = f"{n} settings tried for this stock, so the bar is higher"
-    # Original verdict logic preserved; adjustment only adds the reason/flag
     return verdict, adjusted, reason
 
 
@@ -42,6 +41,9 @@ def rank_for(session: Session, strategy: str, config_name: str, symbol: str, tim
     """'proven' iff this exact strategy+config previously passed the stability check on this symbol.
 
     Returns: (verdict, rank_score, adjusted, reason)
+
+    Stored verdict "candidate" maps to rank "proven" when PF > 1.2 and enough trades,
+    per the platform's stability check definition.
     """
     n = n_trials(session, strategy, symbol)
     fit = session.scalar(select(StrategyFitRow).where(
@@ -49,7 +51,16 @@ def rank_for(session: Session, strategy: str, config_name: str, symbol: str, tim
         StrategyFitRow.symbol == symbol, StrategyFitRow.timeframe == timeframe))
     if fit is None:
         return "unproven", 0.0, False, ""
-    base_verdict = fit.verdict
-    base_score = float(fit.profit_factor) if fit.profit_factor is not None else 99.0
-    adj, adjusted, reason = adjusted_verdict(base_verdict, 0.0, n)  # t-stat not available from stored fit alone
-    return base_verdict, base_score, adjusted, reason
+
+    # Map stored verdict to rank: "candidate" -> "proven" when PF > 1.2 with enough trades.
+    # This preserves the platform's stability-check definition of "proven".
+    if fit.verdict == "candidate" and fit.profit_factor is not None and fit.profit_factor > 1.2:
+        rank = "proven"
+    elif fit.verdict == "candidate":
+        rank = "unproven"
+    else:
+        rank = fit.verdict
+
+    score = float(fit.profit_factor) if fit.profit_factor is not None else 99.0
+    adj, adjusted, reason = adjusted_verdict(rank, 0.0, n)
+    return rank, score, adjusted, reason

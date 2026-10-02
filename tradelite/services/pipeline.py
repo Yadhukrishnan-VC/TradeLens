@@ -116,17 +116,17 @@ class Pipeline:
                     strat = catalog[name](**params)
                     if timeframe not in strat.meta.timeframes or len(df) < strat.meta.min_bars + 2:
                         continue
-                    rank, score = self.rank_for(name, cfg_name, symbol, timeframe)
-                    if self.require_fit and rank != "proven":
+                    verdict, score, adjusted, reason = self.rank_for(name, cfg_name, symbol, timeframe)
+                    if self.require_fit and verdict != "proven":
                         continue
                     prep = strat.prepare(df)
                     sig = strat.on_bar(prep, len(prep) - 1, symbol)
                     if sig is not None:
-                        found.append((sig, cfg_name, rank, score))
+                        found.append((sig, cfg_name, verdict, score))
         found.sort(key=lambda f: (f[2] != "proven", -f[3]))   # proven first, best profit factor first
         created: list[SignalRow] = []
-        for sig, cfg_name, rank, score in found:
-            row = self._store_signal(sig, cfg_name, rank, score)
+        for sig, cfg_name, verdict, score in found:
+            row = self._store_signal(sig, cfg_name, verdict, score)
             if row is None:      # already seen this exact signal
                 continue
             self._route(row, sig)
@@ -134,7 +134,7 @@ class Pipeline:
         self.s.commit()
         return created
 
-    def rank_for(self, strategy: str, config_name: str, symbol: str, timeframe: str = "1d") -> tuple[str, float]:
+    def rank_for(self, strategy: str, config_name: str, symbol: str, timeframe: str = "1d") -> tuple[str, float, bool, str]:
         return ranking.rank_for(self.s, strategy, config_name, symbol, timeframe)
 
     def _store_signal(self, sig: Signal, config_name: str = "default", rank: str = "unproven",

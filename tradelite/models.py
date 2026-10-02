@@ -167,6 +167,18 @@ class TrialsRow(Base):
     expectancy: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class StrategyConfigRow(Base):
+    """A user-customised parameter set for a strategy ("preset"). The built-in defaults are the
+    implicit config named 'default'; presets are tested, ranked and scanned separately."""
+    __tablename__ = "strategy_configs"
+    __table_args__ = (UniqueConstraint("strategy", "name"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    params: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class PriceBarRow(Base):
     """Daily OHLCV bars fetched from free providers, stored in the database."""
     __tablename__ = "price_bars"
