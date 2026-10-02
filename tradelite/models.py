@@ -60,6 +60,7 @@ class PositionRow(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     symbol: Mapped[str] = mapped_column(String(32), index=True)
     strategy: Mapped[str] = mapped_column(String(64))
+    config_name: Mapped[str] = mapped_column(String(64), default="default")
     side: Mapped[str] = mapped_column(String(4))
     qty: Mapped[int] = mapped_column(Integer)
     entry_price: Mapped[float] = mapped_column(Float)
