@@ -215,3 +215,17 @@ class LiveMatchRow(Base):
     fit: Mapped[str] = mapped_column(String(32), default="OK")          # risk-engine verdict for YOUR capital
     first_seen: Mapped[datetime] = mapped_column(DateTime)
     last_seen: Mapped[datetime] = mapped_column(DateTime)
+
+
+class DataQualityRow(Base):
+    """Per-symbol data quality flags: gaps, stale moves, zero volume, staleness."""
+    __tablename__ = "data_quality"
+    __table_args__ = (UniqueConstraint("symbol", "date"),)
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True, index=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    has_gap_5_days: Mapped[bool] = mapped_column(default=False)
+    # one-day move beyond 35% with no split flagged
+    large_one_day_move: Mapped[bool] = mapped_column(default=False)
+    zero_volume_days: Mapped[int] = mapped_column(default=0)
+    staleness_days: Mapped[int] = mapped_column(default=0)
+    adjusted: Mapped[bool] = mapped_column(default=True)  # True = adjusted prices, False = raw

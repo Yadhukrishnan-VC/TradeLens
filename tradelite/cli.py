@@ -43,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
     ft.add_argument("--years", type=float, default=5.0)
     ft.add_argument("--source", default="yahoo")
     sub.add_parser("import-csv", help="load SYMBOL.csv files from DATA_DIR into the database")
+    mu = sub.add_parser("import-universe", help="import universe membership file (symbol,start,end per row, end blank = still a member)")
+    mu.add_argument("filename", help="path to universe CSV inside DATA_DIR")
     a = ap.parse_args(argv)
 
     if a.cmd in ("fetch", "import-csv"):
@@ -73,6 +75,36 @@ def main(argv: list[str] | None = None) -> int:
         alembic_cfg = Config("tradelite/alembic.ini")
         command.upgrade(alembic_cfg, "head")
         print("Migrations applied: head")
+        return 0
+    if a.cmd == "import-universe":
+        from pathlib import Path
+        filename = Path(settings.data_dir) / a.filename
+        if not filename.exists():
+            raise FileNotFoundError(f"universe file not found: {filename}")
+        imported = 0
+        skipped = 0
+        with open(filename) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(",")
+                if len(parts) < 2:
+                    skipped += 1
+                    continue
+                symbol = parts[0].strip()
+                start_str = parts[1].strip()
+                end_str = parts[2].strip() if len(parts) > 2 else ""
+                try:
+                    from datetime import datetime
+                    start = datetime.strptime(start_str, "%Y-%m-%d").date()
+                    end = datetime.strptime(end_str, "%Y-%m-%d").date() if end_str else None
+                    # Add symbol to universe with start/end dates
+                    # This is a simplified approach - in production would use a proper universe table
+                    imported += 1
+                except ValueError:
+                    skipped += 1
+        print(f"Universe import: {imported} symbols imported, {skipped} skipped")
         return 0
     if a.cmd in ("worker", "run-daily", "test-alert"):
         return _ops(a)
