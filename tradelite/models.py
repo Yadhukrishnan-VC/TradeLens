@@ -153,16 +153,18 @@ class JobRunRow(Base):
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
-class StrategyConfigRow(Base):
-    """A user-customised parameter set for a strategy ("preset"). The built-in defaults are the
-    implicit config named 'default'; presets are tested, ranked and scanned separately."""
-    __tablename__ = "strategy_configs"
-    __table_args__ = (UniqueConstraint("strategy", "name"),)
+class TrialsRow(Base):
+    """Every strategy-variant tried on a symbol, for multiple-testing correction."""
+    __tablename__ = "trials"
+    __table_args__ = (UniqueConstraint("strategy", "config_name", "symbol", "params_hash", "run_at"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     strategy: Mapped[str] = mapped_column(String(64), index=True)
-    name: Mapped[str] = mapped_column(String(64))
-    params: Mapped[dict] = mapped_column(JSON)
-    created_at: Mapped[datetime] = mapped_column(DateTime)
+    config_name: Mapped[str] = mapped_column(String(64), default="default")
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    params_hash: Mapped[str] = mapped_column(String(64), index=True)
+    run_at: Mapped[datetime] = mapped_column(DateTime)
+    n_trades: Mapped[int] = mapped_column(Integer)
+    expectancy: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class PriceBarRow(Base):
