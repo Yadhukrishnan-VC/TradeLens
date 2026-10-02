@@ -229,3 +229,18 @@ class DataQualityRow(Base):
     zero_volume_days: Mapped[int] = mapped_column(default=0)
     staleness_days: Mapped[int] = mapped_column(default=0)
     adjusted: Mapped[bool] = mapped_column(default=True)  # True = adjusted prices, False = raw
+
+class PaperReconciliationRow(Base):
+    """Reconciliation record: order fill vs model expectation."""
+    __tablename__ = "paper_reconciliation"
+    __table_args__ = (UniqueConstraint("order_id", "model_price", "fill_price"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(Integer, index=True)
+    model_price: Mapped[float] = mapped_column(Float)  # expected R or price
+    fill_price: Mapped[float] = mapped_column(Float)  # actual fill price
+    realised_slippage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_r_multiple: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_r_ci_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_r_ci_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime)

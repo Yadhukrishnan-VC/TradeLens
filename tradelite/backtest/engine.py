@@ -69,6 +69,8 @@ def run_backtest(
     risk: RiskEngine | None = None,
     cost_model: CostModel | None = None,
     slippage_bps: float = 5.0,
+    impact_k: float = 10.0,           # impact coefficient for square-root formula
+    adv20_value: float | None = None, # ADV20 value for impact calc; None = no cap
 ) -> BacktestResult:
     risk = risk or RiskEngine(RiskConfig())
     cost_model = cost_model or DELIVERY_EQUITY
@@ -93,7 +95,13 @@ def run_backtest(
         # 1) fill the signal decided on the previous bar's close, at this bar's open
         if pending is not None and pos is None:
             sig, pending = pending, None
-            fill = o[i] * (1 + slip * sig.side.sign)
+            # Liquidity-aware slippage: base_bps + impact_k * sqrt(order_value / ADV20_value)
+            if adv20_value is not None and adv20_value > 0:
+                order_value = sig.qty * sig.entry  # simplified: qty * entry_price
+                impact_bps = slip * 10_000 + impact_k * math.sqrt(max(order_value / adv20_value, 1e-8))
+                fill = o[i] * (1 + impact_bps / 10_000 * sig.side.sign)
+            else:
+                fill = o[i] * (1 + slip * sig.side.sign)
             live_sig = replace(sig, entry=fill)
             state = AccountState(equity=cash, cash=cash, open_positions=0, exposure=0.0, realized_pnl_today=0.0)
             decision = risk.evaluate(live_sig, state)
