@@ -1,0 +1,12 @@
+repositories:
+  default:
+    branch: main
+    commits:
+      - ".*"
+    files:
+      - ".env*"
+
+alert:
+  webhook_url: ""
+
+message_format: "[{{repo_name}}] {{commit_msg}} on {{commit_hash}} by {{author_name}}"

@@ -27,5 +27,7 @@ def make_engine(url: str) -> Engine:
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
+    # Run create_all for test compatibility; alembic migrations are
+    # applied separately via `python -m tradelite migrate`.
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)

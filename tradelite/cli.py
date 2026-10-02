@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("--no-fetch", action="store_true", help="skip the price refresh")
     sub.add_parser("test-alert", help="send a test alert to every configured channel")
     sub.add_parser("token", help="print a new random API token for API_TOKEN")
+    mt = sub.add_parser("migrate", help="run alembic migrations to upgrade head (sync schema)")
     ft = sub.add_parser("fetch", help="download daily history from a free provider into the database")
     ft.add_argument("--symbols", help="comma-separated NSE symbols (default: a liquid large-cap list)")
     ft.add_argument("--years", type=float, default=5.0)
@@ -63,6 +64,15 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "token":
         from .api.auth import new_token
         print(new_token())
+        return 0
+    if a.cmd == "migrate":
+        from tradelite.db import make_engine
+        engine = make_engine("sqlite:///tradelite.db")
+        from alembic import command
+        from alembic.config import Config
+        alembic_cfg = Config("tradelite/alembic.ini")
+        command.upgrade(alembic_cfg, "head")
+        print("Migrations applied: head")
         return 0
     if a.cmd in ("worker", "run-daily", "test-alert"):
         return _ops(a)
