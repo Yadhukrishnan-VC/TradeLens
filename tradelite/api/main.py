@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..broker.base import Broker
 from ..broker.paper import PaperBroker
@@ -24,13 +24,15 @@ from ..data.sources import NIFTY_LARGE_CAPS, get_source
 from ..data.synthetic import DemoProvider
 from ..db import make_engine, make_session_factory
 from ..domain import Mode
-from ..models import (AlertRow, BacktestRunRow, JobRunRow, LiveMatchRow, OrderRow, PortfolioRunRow, PositionRow,
-                      SignalRow, StrategyConfigRow, StrategyFitRow)
+from ..models import (AlertRow, BacktestRunRow, EventRow, JobRunRow, LiveMatchRow, OrderRow, PortfolioRunRow,
+                      PositionAlertRow, PositionRow, SignalRow, StrategyConfigRow, StrategyFitRow,
+                      StrategyLifecycleRow, WatchRow)
 from ..risk.engine import RiskEngine
-from ..services import backtests, ingest, portfolio as portfolio_svc, presets
+from ..services import backtests, context as context_svc, events as events_svc, ingest, lifecycle, portfolio as portfolio_svc, presets
 from ..services.alerts import Alert, build_notifier
 from ..services.jobs import build_pipeline
 from ..services.screener import LiveScreener, ist_now
+from ..services.gate import GateConfig
 from ..services.pipeline import Pipeline
 from ..strategies import registry
 from .auth import install_auth
@@ -74,6 +76,24 @@ class BatchRequest(BaseModel):
     strategies: list[str] | None = None
     symbols: list[str] | None = None
     rr: float | None = Field(None, gt=0, le=20)   # e.g. 5 -> tests every strategy with a 1:5 target (preset "rr5")
+
+
+class LifecycleRequest(BaseModel):
+    strategy: str
+    config_name: str = "default"
+    state: str
+    note: str = ""
+
+
+class EventRequest(BaseModel):
+    symbol: str = "*"                 # '*' = the whole market
+    day: date
+    kind: str = Field("event", max_length=32)
+    note: str = Field("", max_length=200)
+
+
+class EventCsv(BaseModel):
+    csv: str = Field(max_length=200_000)
 
 
 class ScanRequest(BaseModel):
@@ -135,7 +155,9 @@ def create_app(
         return Pipeline(sess, provider, broker, risk=risk, starting_capital=settings.starting_capital).account_state()
 
     screener = LiveScreener(sf, provider, live_source, risk, _account_state, interval=settings.live_interval,
-                            notifier=notifier, clock=live_clock or ist_now, enabled=settings.live_screener)
+                            notifier=notifier, clock=live_clock or ist_now, enabled=settings.live_screener,
+                            benchmark=settings.benchmark_symbol, event_window_days=settings.event_window_days,
+                            telegram=bool(settings.telegram_bot_token and settings.telegram_chat_id))
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -339,6 +361,105 @@ def create_app(
     def screener_run(force: bool = False):
         """Check now. Outside market hours this does nothing unless force=true (useful for testing)."""
         return screener.run_once(force=force)
+
+    # ---------- decision support: context, watchlist, advice, lifecycle, events ----------
+    @app.get("/context")
+    def market_context(s=Depends(session_dep)):
+        """Market regime + account + risk state in one place, plus how the gate is set."""
+        p = pipe(s)
+        regime = p.regime_now()
+        return {"as_of": screener.clock().date().isoformat(), "regime": context_svc.regime_dict(regime),
+                "portfolio": context_svc.portfolio_snapshot(s, p.account_state(), settings.starting_capital, risk.cfg),
+                "gate": {"mode": GateConfig.from_settings(settings, Mode(settings.mode)).mode,
+                         "enforce_regime": settings.enforce_regime, "event_window_days": settings.event_window_days,
+                         "validation_max_age_days": settings.validation_max_age_days}}
+
+    @app.get("/watchlist")
+    def watchlist(s=Depends(session_dep)):
+        """Setups one step from triggering, from the latest scan: proven ones first, then the closest."""
+        latest = s.scalar(select(func.max(WatchRow.bar_ts)))
+        if latest is None:
+            return {"as_of": None, "items": []}
+        p = pipe(s)
+        items = []
+        for w in s.scalars(select(WatchRow).where(WatchRow.bar_ts == latest)).all():
+            rank, score = p.rank_for(w.strategy, w.config_name, w.symbol)
+            items.append({**_row(w), "rank": rank, "rank_score": score})
+        items.sort(key=lambda d: (d["rank"] != "proven", abs(d["distance_pct"]) if d["distance_pct"] is not None else 99.0))
+        return {"as_of": latest.date().isoformat(), "items": items[:60]}
+
+    @app.get("/position-alerts")
+    def position_alerts(open_only: bool = True, s=Depends(session_dep)):
+        q = select(PositionAlertRow).order_by(PositionAlertRow.id.desc()).limit(100)
+        if open_only:
+            q = q.join(PositionRow, PositionRow.id == PositionAlertRow.position_id).where(PositionRow.closed_at.is_(None))
+        return [_row(a) for a in s.scalars(q).all()]
+
+    @app.post("/position-alerts/review")
+    def review_positions(s=Depends(session_dep)):
+        return [_row(a) for a in pipe(s).review_positions()]
+
+    @app.post("/position-alerts/{alert_id}/ack")
+    def ack_position_alert(alert_id: int, s=Depends(session_dep)):
+        row = s.get(PositionAlertRow, alert_id)
+        if row is None:
+            raise HTTPException(404, "not found")
+        row.acknowledged = True
+        s.commit()
+        return _row(row)
+
+    @app.get("/lifecycle")
+    def lifecycle_list(s=Depends(session_dep)):
+        """Every strategy and saved preset with its state and how much evidence it has."""
+        states = lifecycle.states_for(s)
+        notes = {(r.strategy, r.config_name): r for r in s.scalars(select(StrategyLifecycleRow)).all()}
+        fits = s.scalars(select(StrategyFitRow)).all()
+        out = []
+        for name, cls in sorted(registry.discover().items()):
+            configs = ["default"] + [r.name for r in presets.for_strategies(s, [name])[name]]
+            for cfg in configs:
+                mine = [f for f in fits if f.strategy == name and f.config_name == cfg]
+                out.append({"strategy": name, "config_name": cfg, "state": states.get((name, cfg), "active"),
+                            "note": notes[(name, cfg)].note if (name, cfg) in notes else "",
+                            "tested": len(mine), "proven": sum(f.verdict == "candidate" for f in mine),
+                            "regimes": list(cls.meta.regimes)})
+        return out
+
+    @app.post("/lifecycle")
+    def lifecycle_set(req: LifecycleRequest, s=Depends(session_dep)):
+        if req.strategy not in registry.discover():
+            raise HTTPException(400, f"unknown strategy '{req.strategy}'")
+        if req.config_name != "default" and not s.scalar(select(StrategyConfigRow.id).where(
+                StrategyConfigRow.strategy == req.strategy, StrategyConfigRow.name == req.config_name)):
+            raise HTTPException(400, f"no preset '{req.config_name}' for {req.strategy}")
+        try:
+            row = lifecycle.set_state(s, req.strategy, req.config_name, req.state, req.note)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return _row(row)
+
+    @app.get("/events")
+    def events_list(days: int = 90, s=Depends(session_dep)):
+        today = screener.clock().date()
+        q = select(EventRow).where(EventRow.day >= today, EventRow.day <= today + timedelta(days=days)).order_by(EventRow.day, EventRow.symbol)
+        return [_row(e) for e in s.scalars(q).all()]
+
+    @app.post("/events")
+    def events_add(req: EventRequest, s=Depends(session_dep)):
+        return _row(events_svc.add_event(s, req.symbol, req.day, req.kind, req.note))
+
+    @app.post("/events/import")
+    def events_import(req: EventCsv, s=Depends(session_dep)):
+        return events_svc.import_csv(s, req.csv)
+
+    @app.delete("/events/{event_id}")
+    def events_delete(event_id: int, s=Depends(session_dep)):
+        row = s.get(EventRow, event_id)
+        if row is None:
+            raise HTTPException(404, "not found")
+        s.delete(row)
+        s.commit()
+        return {"deleted": event_id}
 
     @app.get("/fits")
     def fits(s=Depends(session_dep)):

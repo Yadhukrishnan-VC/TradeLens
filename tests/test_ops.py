@@ -292,8 +292,11 @@ def fresh_frames(*names, end="2026-09-30"):
 class FakePipeline:
     """Stands in for Pipeline so the job's wiring (order, alerts, records) is tested in isolation."""
     log: list = []
+    last_watch: list = []
     def __init__(self, signals=()):
         self.signals = list(signals)
+    def review_positions(self):
+        return []
     def check_exits(self):
         FakePipeline.log.append("exits")
         return [SimpleNamespace(symbol="AAA", exit_reason="stop", pnl=-1234.0, strategy="ema_cross", side="BUY", qty=10,

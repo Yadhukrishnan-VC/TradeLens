@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, errText, useLoad } from "../api";
 import { Badge } from "../components/Badge";
+import { Flags, Gate } from "../components/Flags";
 import { Notice, type NoticeState } from "../components/Notice";
 import { day, inr, reasonText } from "../format";
 import type { ScanMode } from "../types";
@@ -59,12 +60,12 @@ export function Signals({ refreshKey, onChange, serverMode }: { refreshKey: numb
         {signals.error && <p className="error-text">{signals.error}</p>}
         {(signals.data ?? []).length === 0 ? <p className="empty">No signals yet. Scan above; signals only appear when a strategy fires on the latest bar.</p> : (
           <div className="scroll"><table>
-            <thead><tr><th>Bar</th><th>Symbol</th><th>Strategy</th><th className="num">Entry</th><th className="num">Stop</th><th className="num">Target</th><th className="num">Sized</th><th>Track record</th><th>Status</th><th>Why</th></tr></thead>
+            <thead><tr><th>Bar</th><th>Symbol</th><th>Strategy</th><th className="num">Entry</th><th className="num">Stop</th><th className="num">Target</th><th className="num">Sized</th><th>Track record</th><th>Gate</th><th>Checks</th><th>Status</th><th>Why</th></tr></thead>
             <tbody>{(signals.data ?? []).map((s) => (
               <tr key={s.id}>
                 <td>{day(s.ts)}</td><td><strong>{s.symbol}</strong></td><td>{s.strategy}{s.config_name !== "default" && <span className="muted"> · {s.config_name}</span>}</td>
                 <td className="num">{inr(s.entry, 2)}</td><td className="num loss">{inr(s.stop, 2)}</td><td className="num gain">{inr(s.target, 2)}</td>
-                <td className="num">{s.suggested_qty || "–"}</td><td><Badge kind={s.rank} /></td><td><Badge kind={s.status} /></td><td className="muted">{reasonText(s.reason)}</td>
+                <td className="num">{s.suggested_qty || "–"}</td><td><Badge kind={s.rank} /></td><td><Gate gate={s.gate} reason={s.gate_reason} /></td><td><Flags flags={s.flags} />{s.regime && <div className="muted small">market {s.regime}</div>}</td><td><Badge kind={s.status} /></td><td className="muted">{reasonText(s.reason)}</td>
               </tr>))}</tbody>
           </table></div>
         )}
