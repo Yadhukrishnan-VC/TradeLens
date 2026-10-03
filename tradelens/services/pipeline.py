@@ -17,7 +17,7 @@ from ..models import Account, OrderRow, PositionAlertRow, PositionRow, SignalRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
 from . import context, events, gate, lifecycle, presets, quality, ranking
-from .alerts import Alert
+from .alerts import Alert, Notifier
 from .gate import GateConfig
 
 IST = timezone(timedelta(hours=5, minutes=30))

@@ -22,7 +22,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://tradelens:${POSTGRES_PASSWORD:-tradelens}@db:5432/tradelens
+      DATABASE_URL: postgresql://tradelens:${POSTGRES_PASSWORD?set POSTGRES_PASSWORD in .env}@db:5432/tradelens
       DATA_SOURCE: db
       DATA_DIR: /app/data
       TRADELENS_DEMO: ${TRADELENS_DEMO:-0}
@@ -38,57 +38,34 @@ services:
       LIVE_INTERVAL_SECONDS: ${LIVE_INTERVAL_SECONDS:-300}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelens token)}
     volumes:
       - ./data:/app/data:ro          # optional: SYMBOL.csv files for `import-csv`
     # Token auth protects the API, but keep it bound to this machine; put HTTPS in front before exposing it.
     ports:
       - "127.0.0.1:8000:8000"
-    command: ["python", "-m", "tradelens", "migrate"]
+    # create/upgrade the schema, then serve (this REPLACES the image's default CMD, so it must start the server)
+    command: ["sh", "-c", "python -m tradelens migrate && exec uvicorn tradelens.api.main:create_app --factory --host 0.0.0.0 --port 8000"]
 
   # Runs the daily job after market close on trading days. Same image, same database, no published port.
-  worker:
-    build: .
-    command: ["python", "-m", "tradelens", "migrate", "&&", "python", "-m", "tradelens", "worker"]
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://tradelens:${POSTGRES_PASSWORD:-tradelens}@db:5432/tradelens
-      DATA_SOURCE: db
-      DATA_DIR: /app/data
-      TRADELENS_DEMO: ${TRADELENS_DEMO:-0}
-      TRADELENS_MODE: ${TRADELENS_MODE:-semi_auto}
-      STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
-      BROKER: paper
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelens token)}
-      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
-      HEALTHCHECK_PING_URL: ${HEALTHCHECK_PING_URL:-}
-      DAILY_RUN_AT: ${DAILY_RUN_AT:-16:30}
-      HOLIDAYS_FILE: ${HOLIDAYS_FILE:-}
-      REFRESH_YEARS: ${REFRESH_YEARS:-5}
-    volumes:
-      - ./data:/app/data:ro          # put holidays.txt here and set HOLIDAYS_FILE=/app/data/holidays.txt
-
-  # Runs the daily job after market close on trading days. Same image, same database, no published port.
+  # Starts after the app is healthy so only one container creates/upgrades the schema.
   worker:
     build: .
     command: ["python", "-m", "tradelens", "worker"]
     restart: unless-stopped
     depends_on:
-      db:
+      app:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://tradelens:${POSTGRES_PASSWORD:-tradelens}@db:5432/tradelens
+      DATABASE_URL: postgresql://tradelens:${POSTGRES_PASSWORD?set POSTGRES_PASSWORD in .env}@db:5432/tradelens
       DATA_SOURCE: db
       DATA_DIR: /app/data
       TRADELENS_DEMO: ${TRADELENS_DEMO:-0}
       TRADELENS_MODE: ${TRADELENS_MODE:-semi_auto}
       STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
       BROKER: paper
+      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelens token)}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}

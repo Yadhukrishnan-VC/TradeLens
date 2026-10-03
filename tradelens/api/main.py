@@ -118,6 +118,16 @@ def _proven_first(rows: list) -> list:
     return sorted(rows, key=lambda r: (r.rank != "proven", -(r.rank_score or 0.0)))
 
 
+class WalkForwardRequest(BaseModel):
+    strategy: str
+    symbol: str
+    param_grid: list[dict[str, Any]] | None = None
+    train_years: float = Field(3.0, gt=0, le=20)
+    test_years: float = Field(1.0, gt=0, le=10)
+    step_years: float = Field(1.0, gt=0, le=10)
+    embargo_years: float = Field(0.0, ge=0, le=2)
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -383,7 +393,7 @@ def create_app(
         p = pipe(s)
         items = []
         for w in s.scalars(select(WatchRow).where(WatchRow.bar_ts == latest)).all():
-            rank, score = p.rank_for(w.strategy, w.config_name, w.symbol)
+            rank, score, _adjusted, _reason = p.rank_for(w.strategy, w.config_name, w.symbol)
             items.append({**_row(w), "rank": rank, "rank_score": score})
         items.sort(key=lambda d: (d["rank"] != "proven", abs(d["distance_pct"]) if d["distance_pct"] is not None else 99.0))
         return {"as_of": latest.date().isoformat(), "items": items[:60]}
@@ -474,30 +484,20 @@ def create_app(
             raise HTTPException(400, f"unknown strategy or symbol: {e}") from e
         return [_row(r) for r in _proven_first(rows)]
 
-    @app.post("/holdout/evaluate")
-    def holdout_evaluate(s=Depends(session_dep)):
-        """Record a holdout evaluation for a strategy/config pair.
-
-        Returns 409 if this (strategy, config) has already been evaluated
-        unless explicitly reset with a logged reason.
-        """
+    @app.post("/walkforward")
+    def walkforward(req: WalkForwardRequest, s=Depends(session_dep)):
+        """Pick settings on a training slice, judge them on the next unseen slice, over rolling windows.
+        Every setting tried is counted in the trial registry."""
         from ..backtest.walkforward import walkforward_validate
-        from ..models import StrategyFitRow
-
-        # Check if already evaluated
-        existing = s.scalar(
-            select(StrategyFitRow).where(
-                StrategyFitRow.strategy == "holdout",
-                StrategyFitRow.config_name == "holdout",
-            )
-        )
-        if existing is not None:
-            raise HTTPException(409, "Holdout already evaluated. Use reset with a reason to re-evaluate.")
-
-        # In a full implementation, this would accept strategy/symbol params
-        # and run walk-forward validation, recording results in holdout_evals.
-        # For now, return a structure for the UI.
-        return {"status": "holdout evaluation recorded", "detail": "Configure with strategy/symbol for full walk-forward"}
+        try:
+            return walkforward_validate(
+                s, provider, req.strategy.strip(), req.symbol.strip().upper(), param_grid=req.param_grid,
+                train_years=req.train_years, test_years=req.test_years, step_years=req.step_years,
+                embargo_years=req.embargo_years)
+        except KeyError as e:
+            raise HTTPException(404, f"unknown strategy or symbol: {e}") from e
+        except (ValueError, DataQualityError) as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.get("/signals")
     def signals(s=Depends(session_dep)):

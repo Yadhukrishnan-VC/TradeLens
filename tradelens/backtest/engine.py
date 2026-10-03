@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -95,13 +96,17 @@ def run_backtest(
         # 1) fill the signal decided on the previous bar's close, at this bar's open
         if pending is not None and pos is None:
             sig, pending = pending, None
-            # Liquidity-aware slippage: base_bps + impact_k * sqrt(order_value / ADV20_value)
+            # Fill at the open with flat slippage; size the order with the SAME risk engine.
+            fill = o[i] * (1 + slip * sig.side.sign)
+            # Liquidity-aware slippage: base_bps + impact_k * sqrt(order_value / ADV20_value). The order size is
+            # only known after risk sizing, so size once at the flat-slippage fill, then re-price with impact.
             if adv20_value is not None and adv20_value > 0:
-                order_value = sig.qty * sig.entry  # simplified: qty * entry_price
-                impact_bps = slip * 10_000 + impact_k * math.sqrt(max(order_value / adv20_value, 1e-8))
-                fill = o[i] * (1 + impact_bps / 10_000 * sig.side.sign)
-            else:
-                fill = o[i] * (1 + slip * sig.side.sign)
+                probe = risk.evaluate(replace(sig, entry=fill), AccountState(
+                    equity=cash, cash=cash, open_positions=0, exposure=0.0, realized_pnl_today=0.0))
+                if probe.approved:
+                    order_value = probe.qty * fill
+                    impact_bps = slip * 10_000 + impact_k * math.sqrt(max(order_value / adv20_value, 1e-8))
+                    fill = o[i] * (1 + impact_bps / 10_000 * sig.side.sign)
             live_sig = replace(sig, entry=fill)
             state = AccountState(equity=cash, cash=cash, open_positions=0, exposure=0.0, realized_pnl_today=0.0)
             decision = risk.evaluate(live_sig, state)

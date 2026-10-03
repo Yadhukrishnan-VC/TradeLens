@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("--no-fetch", action="store_true", help="skip the price refresh")
     sub.add_parser("test-alert", help="send a test alert to every configured channel")
     sub.add_parser("token", help="print a new random API token for API_TOKEN")
-    mt = sub.add_parser("migrate", help="run alembic migrations to upgrade head (sync schema)")
+    sub.add_parser("migrate", help="create the database schema or add any missing columns (safe to repeat)")
     ft = sub.add_parser("fetch", help="download daily history from a free provider into the database")
     ft.add_argument("--symbols", help="comma-separated NSE symbols (default: a liquid large-cap list)")
     ft.add_argument("--years", type=float, default=5.0)
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     ie.add_argument("file")
     fe = sub.add_parser("fetch-events", help="best effort: pull upcoming earnings dates for stored stocks from Yahoo")
     fe.add_argument("--symbols", help="comma-separated (default: every stored stock)")
-    mu = sub.add_parser("import-universe", help="import universe membership file (symbol,start,end per row, end blank = still a member)")
+    mu = sub.add_parser("import-universe", help="validate a universe membership CSV (symbol,start,end per row, end blank = still a member)")
     mu.add_argument("filename", help="path to universe CSV inside DATA_DIR")
     a = ap.parse_args(argv)
 
@@ -92,43 +92,27 @@ def main(argv: list[str] | None = None) -> int:
         print(new_token())
         return 0
     if a.cmd == "migrate":
-        from tradelens.db import make_engine
-        engine = make_engine("sqlite:///tradelens.db")
-        from alembic import command
-        from alembic.config import Config
-        alembic_cfg = Config("tradelens/alembic.ini")
-        command.upgrade(alembic_cfg, "head")
-        print("Migrations applied: head")
+        # The schema is managed by db.make_session_factory (create_all + additive column upgrade), the same
+        # code path the API and worker use, so this works on SQLite and PostgreSQL and is safe to repeat.
+        settings = get_settings()
+        make_session_factory(make_engine(settings.database_url))
+        print("Database schema is up to date")
         return 0
     if a.cmd == "import-universe":
+        # Universe membership is read straight from the CSV when needed (`portfolio --universe-file`), so this
+        # command validates the file and reports what it contains instead of copying it anywhere.
         from pathlib import Path
-        filename = Path(settings.data_dir) / a.filename
+
+        from .data.universe import IntervalUniverse
+        settings = get_settings()
+        filename = Path(settings.data_dir) / a.filename if not Path(a.filename).is_absolute() else Path(a.filename)
         if not filename.exists():
-            raise FileNotFoundError(f"universe file not found: {filename}")
-        imported = 0
-        skipped = 0
-        with open(filename) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split(",")
-                if len(parts) < 2:
-                    skipped += 1
-                    continue
-                symbol = parts[0].strip()
-                start_str = parts[1].strip()
-                end_str = parts[2].strip() if len(parts) > 2 else ""
-                try:
-                    from datetime import datetime
-                    start = datetime.strptime(start_str, "%Y-%m-%d").date()
-                    end = datetime.strptime(end_str, "%Y-%m-%d").date() if end_str else None
-                    # Add symbol to universe with start/end dates
-                    # This is a simplified approach - in production would use a proper universe table
-                    imported += 1
-                except ValueError:
-                    skipped += 1
-        print(f"Universe import: {imported} symbols imported, {skipped} skipped")
+            print(f"universe file not found: {filename}")
+            return 1
+        uni = IntervalUniverse.from_csv(filename)
+        n_rows = sum(len(v) for v in uni.intervals.values())
+        print(f"{filename}: {len(uni.symbols)} symbols, {n_rows} membership rows - valid. "
+              f"Use it with: python -m tradelens portfolio --universe-file {filename}")
         return 0
     if a.cmd in ("worker", "run-daily", "test-alert"):
         return _ops(a)

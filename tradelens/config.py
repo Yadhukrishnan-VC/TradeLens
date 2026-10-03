@@ -33,14 +33,19 @@ class Settings:
     validation_max_age_days: int = 45    # a "proven" verdict older than this counts as stale
 
 
+def _env(name: str, default: str) -> str:
+    """TRADELENS_<name>, falling back to the pre-rename TRADELITE_<name> so an old .env keeps working."""
+    return os.getenv(f"TRADELENS_{name}", os.getenv(f"TRADELITE_{name}", default))
+
+
 def get_settings() -> Settings:
     """Read settings from the environment at call time (so tests can override)."""
     return Settings(
         database_url=os.getenv("DATABASE_URL", "sqlite:///tradelens.db"),
         data_dir=os.getenv("DATA_DIR", "data"),
-        demo=os.getenv("TRADELENS_DEMO", "0") == "1",
+        demo=_env("DEMO", "0") == "1",
         starting_capital=float(os.getenv("STARTING_CAPITAL", "100000")),
-        mode=os.getenv("TRADELENS_MODE", "semi_auto"),
+        mode=_env("MODE", "semi_auto"),
         broker=os.getenv("BROKER", "paper"),
         data_source=os.getenv("DATA_SOURCE", "db"),
         live_screener=os.getenv("LIVE_SCREENER", "1") == "1",

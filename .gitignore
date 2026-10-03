@@ -7,3 +7,6 @@ __pycache__/
 .pytest_cache/
 data/*.csv
 .env
+
+*.egg-info/
+backups/
