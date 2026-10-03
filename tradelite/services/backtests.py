@@ -13,7 +13,7 @@ from ..data.base import DataProvider
 from ..models import BacktestRunRow, StrategyFitRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
-from . import presets
+from . import lifecycle, presets
 
 
 def run_and_store(
@@ -74,6 +74,7 @@ def run_and_store(
     row.detail = detail
     row.updated_at = now
     session.commit()
+    lifecycle.record_evidence(session, strategy_name, config_name)   # a passing test promotes a draft to validated
     return {"run_id": run.id, "config_name": config_name, "verdict": fit["verdict"], "metrics": res.metrics,
             "early": fit["early"], "late": fit["late"], "skipped": res.skipped,
             "n_trades": len(trades)}
