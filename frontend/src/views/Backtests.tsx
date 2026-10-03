@@ -86,7 +86,7 @@ export function Backtests({ refreshKey, onChange }: { refreshKey: number; onChan
         <h2>Run a backtest</h2>
         {symbols.error && <p className="error-text">{symbols.error}</p>}
         {!symbols.error && symList.length === 0 && !symbols.loading && (
-          <p className="empty">No symbols found. Open the Data page and fetch prices, or start the server with TRADELITE_DEMO=1.</p>
+          <p className="empty">No symbols found. Open the Data page and fetch prices, or start the server with TRADELENS_DEMO=1.</p>
         )}
         <div className="form-row">
           <label>Strategy

@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from .models import Base
 
-log = logging.getLogger("tradelite.db")
+log = logging.getLogger("tradelens.db")
 
 
 def normalize_url(url: str) -> str:
@@ -62,7 +62,7 @@ def upgrade_schema(engine: Engine) -> list[str]:
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
     # Run create_all for test compatibility; alembic migrations are
-    # applied separately via `python -m tradelite migrate`.
+    # applied separately via `python -m tradelens migrate`.
     Base.metadata.create_all(engine)
     upgrade_schema(engine)
     return sessionmaker(engine, expire_on_commit=False)

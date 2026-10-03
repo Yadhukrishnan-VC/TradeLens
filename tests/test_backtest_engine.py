@@ -1,12 +1,12 @@
 import pandas as pd
 import pytest
 
-from tradelite.backtest.costs import CostModel
-from tradelite.backtest.engine import run_backtest
-from tradelite.domain import Side, Signal
-from tradelite.exits import check_exit
-from tradelite.risk.engine import RiskConfig, RiskEngine
-from tradelite.strategies.base import Strategy, StrategyMeta
+from tradelens.backtest.costs import CostModel
+from tradelens.backtest.engine import run_backtest
+from tradelens.domain import Side, Signal
+from tradelens.exits import check_exit
+from tradelens.risk.engine import RiskConfig, RiskEngine
+from tradelens.strategies.base import Strategy, StrategyMeta
 from conftest import make_df
 
 ZERO_COST = CostModel(0, 0, 0, 0, 0, 0, 0, 0)

@@ -3,10 +3,10 @@ import pytest
 from conftest import fresh_engine
 from fastapi.testclient import TestClient
 
-from tradelite.api.main import create_app
-from tradelite.config import Settings
-from tradelite.data.synthetic import DemoProvider
-from tradelite.db import make_session_factory
+from tradelens.api.main import create_app
+from tradelens.config import Settings
+from tradelens.data.synthetic import DemoProvider
+from tradelens.db import make_session_factory
 
 
 @pytest.fixture
@@ -53,11 +53,11 @@ def test_symbols_and_risk_config(client):
 
 
 def test_dashboard_is_served_when_built(tmp_path):
-    (tmp_path / "index.html").write_text("<html>tradelite ui</html>")
+    (tmp_path / "index.html").write_text("<html>tradelens ui</html>")
     settings = Settings("sqlite://", "data", True, 100_000.0, "semi_auto", "paper")
     app = create_app(settings, provider=DemoProvider(), frontend_dist=tmp_path,
                      session_factory=make_session_factory(fresh_engine()))
     c = TestClient(app)
-    assert "tradelite ui" in c.get("/ui/").text
+    assert "tradelens ui" in c.get("/ui/").text
     assert c.get("/", follow_redirects=False).headers["location"] == "/ui/"
     assert c.get("/health").status_code == 200          # API unaffected by the static mount

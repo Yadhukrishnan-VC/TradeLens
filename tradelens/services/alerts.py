@@ -17,7 +17,7 @@ from ..config import Settings
 from ..models import AlertRow
 from .breaker import CircuitBreaker, get_breaker
 
-log = logging.getLogger("tradelite.alerts")
+log = logging.getLogger("tradelens.alerts")
 LEVELS = ("info", "warning", "critical")
 _ICON = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
 MAX_TEXT = 3900   # Telegram's limit is 4096 characters
@@ -34,7 +34,7 @@ class Alert:
             raise ValueError(f"alert level must be one of {LEVELS}")
 
     def text(self) -> str:
-        t = f"{_ICON[self.level]} tradelite: {self.title}" + (f"\n{self.body}" if self.body else "")
+        t = f"{_ICON[self.level]} tradelens: {self.title}" + (f"\n{self.body}" if self.body else "")
         return t if len(t) <= MAX_TEXT else t[: MAX_TEXT - 1] + "…"
 
 

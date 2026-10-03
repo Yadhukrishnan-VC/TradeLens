@@ -18,7 +18,7 @@ from ..models import PortfolioRunRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
 
-DEFAULT_BENCHMARK = "NIFTYBEES"   # Nifty 50 ETF; fetch it first (`tradelite fetch --symbols NIFTYBEES`)
+DEFAULT_BENCHMARK = "NIFTYBEES"   # Nifty 50 ETF; fetch it first (`tradelens fetch --symbols NIFTYBEES`)
 
 
 def _clean(x: Any) -> Any:

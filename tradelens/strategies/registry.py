@@ -11,7 +11,7 @@ _SKIP = {"base", "registry"}
 
 def discover() -> dict[str, type[Strategy]]:
     """Import every module in this package and collect Strategy subclasses by meta.name."""
-    import tradelite.strategies as pkg
+    import tradelens.strategies as pkg
 
     found: dict[str, type[Strategy]] = {}
     for m in pkgutil.iter_modules(pkg.__path__):

@@ -1,4 +1,4 @@
-# tradelite
+# tradelens
 
 Small, working trading platform: strategies as plugin files, honest backtests, one shared risk
 engine, paper broker, FastAPI backend. Live Zerodha is **deliberately not built yet**.
@@ -13,26 +13,26 @@ The app is bound to `127.0.0.1` only because the API requires a bearer token (`A
 
 Then, in the dashboard, open **Data** and click *Fetch prices* (or use the command line):
 ```bash
-docker compose exec app python -m tradelite fetch --years 5                 # liquid NSE large caps
-docker compose exec app python -m tradelite fetch --symbols RELIANCE,TCS    # your own list
-docker compose exec app python -m tradelite import-csv                      # SYMBOL.csv files from ./data
+docker compose exec app python -m tradelens fetch --years 5                 # liquid NSE large caps
+docker compose exec app python -m tradelens fetch --symbols RELIANCE,TCS    # your own list
+docker compose exec app python -m tradelens import-csv                      # SYMBOL.csv files from ./data
 ```
-Try it without any real data: `TRADELITE_DEMO=1 docker compose up --build` (synthetic prices, proves plumbing only).
+Try it without any real data: `TRADELENS_DEMO=1 docker compose up --build` (synthetic prices, proves plumbing only).
 
 ## Run it without Docker
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" && pytest                # 80 tests
-DATABASE_URL=postgresql://user:pass@localhost:5432/tradelite \
-  uvicorn tradelite.api.main:create_app --factory --port 8000     # or leave DATABASE_URL unset for SQLite
+DATABASE_URL=postgresql://user:pass@localhost:5432/tradelens \
+  uvicorn tradelens.api.main:create_app --factory --port 8000     # or leave DATABASE_URL unset for SQLite
 ```
 The dashboard is prebuilt in `frontend/dist`. To rebuild or develop it (needs Node 20+):
 `cd frontend && npm install && npm run build` (`npm run dev` for hot reload on :5173, API on :8000).
 
-Run the whole test suite on PostgreSQL: `TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/tradelite_test pytest`
+Run the whole test suite on PostgreSQL: `TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/tradelens_test pytest`
 (it drops and recreates the tables in that database, so use a scratch one).
 UI end-to-end test (real seeded server): `python scripts/seed_e2e.py <db-url>`, start the server with
-`TRADELITE_DEMO=1 DATABASE_URL=<db-url>` on port 8766, then `cd frontend && TL_API=http://127.0.0.1:8766 npm run test:e2e`.
+`TRADELENS_DEMO=1 DATABASE_URL=<db-url>` on port 8766, then `cd frontend && TL_API=http://127.0.0.1:8766 npm run test:e2e`.
 
 ## Strategies
 Seven built in, all long-only daily-bar strategies with an ATR stop and an R-multiple target:
@@ -44,7 +44,7 @@ platform tests every strategy on every stock and only ranks up the ones that hol
 **Customise**: Backtests page, *Customise this strategy's settings*. Change the numbers, name them, save. Saved settings
 are scanned alongside the built-in ones and get their own track record. `GET/POST/DELETE /strategy-configs`.
 
-**Add a strategy**: create `tradelite/strategies/my_strategy.py` with a `Strategy` subclass (`meta`, `prepare`, `on_bar`).
+**Add a strategy**: create `tradelens/strategies/my_strategy.py` with a `Strategy` subclass (`meta`, `prepare`, `on_bar`).
 It is auto-discovered and `tests/test_strategies.py` checks it for look-ahead bias.
 
 ## What worked, and ranking
@@ -99,7 +99,7 @@ built-in strategies, and presets saved before this existed, start active.
 
 **Market context** (bar on every page, `GET /context`). Trend (benchmark against its 200- and 50-day averages), volatility
 (20-day realised volatility against the past year) and breadth (share of stored stocks above their 50-day average), from plain rules
-and prices up to the decision bar only. Needs the benchmark stored: `python -m tradelite fetch --symbols NIFTYBEES`. Each strategy
+and prices up to the decision bar only. Needs the benchmark stored: `python -m tradelens fetch --symbols NIFTYBEES`. Each strategy
 declares the trends it is made for; a signal outside them is flagged `OFF_REGIME`. Every signal stores the regime it fired in.
 
 **Data quality on every signal.** Stale prices (behind the rest of the universe), a one-day move over 35%, gaps in the data,
@@ -121,7 +121,7 @@ then one probe decides. "No data for this symbol" is a normal answer and never t
 **Upgrading an existing database.** Missing columns are added automatically at start (`ADD COLUMN` only, nothing dropped or rewritten).
 Renames or removals still need a manual migration.
 
-## Modes (`TRADELITE_MODE`)
+## Modes (`TRADELENS_MODE`)
 `signal_only` records signals · `semi_auto` creates orders that wait for your approval · `auto` sends
 risk-approved orders to the broker. Stops/targets are always automatic via `POST /exits/check`.
 
@@ -132,9 +132,9 @@ The single-symbol backtest answers "does this rule work on this stock". The port
 slots and capital of the same risk engine, and are judged against the market.
 
 ```
-tradelite fetch --symbols NIFTYBEES              # the benchmark (a Nifty 50 ETF), stored like any symbol
-tradelite portfolio --benchmark NIFTYBEES --start 2021-01-01 --risk-free 0.065
-tradelite portfolio --liquid-top-n 15 --universe-file universe.csv
+tradelens fetch --symbols NIFTYBEES              # the benchmark (a Nifty 50 ETF), stored like any symbol
+tradelens portfolio --benchmark NIFTYBEES --start 2021-01-01 --risk-free 0.065
+tradelens portfolio --liquid-top-n 15 --universe-file universe.csv
 ```
 API: `POST /portfolio-backtests`, `GET /portfolio-backtests[/id]` (stored with trades and equity curves).
 
@@ -156,9 +156,9 @@ membership file and the prices for removed names, treat every result as an upper
 ## Running it every day: worker, alerts, auth
 
 ```
-python -m tradelite token          # -> put it in .env as API_TOKEN (docker compose refuses to start without one)
-python -m tradelite test-alert     # after setting TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (and/or ALERT_WEBHOOK_URL)
-python -m tradelite run-daily      # one full pass by hand; `worker` does this on a schedule
+python -m tradelens token          # -> put it in .env as API_TOKEN (docker compose refuses to start without one)
+python -m tradelens test-alert     # after setting TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (and/or ALERT_WEBHOOK_URL)
+python -m tradelens run-daily      # one full pass by hand; `worker` does this on a schedule
 ```
 `docker compose up` starts the API and a **worker**. On trading days at `DAILY_RUN_AT` (IST, default 16:30, after the close) it:
 refreshes prices -> refuses to trade on stale bars (a symbol without today's bar is skipped and reported; if none has one, the run

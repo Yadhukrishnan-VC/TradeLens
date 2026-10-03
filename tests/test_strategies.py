@@ -1,7 +1,7 @@
 import pytest
 
-from tradelite.data.synthetic import make_bars
-from tradelite.strategies import registry
+from tradelens.data.synthetic import make_bars
+from tradelens.strategies import registry
 
 NAMES = sorted(registry.discover())
 

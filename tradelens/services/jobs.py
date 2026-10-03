@@ -33,7 +33,7 @@ from .gate import GateConfig
 from .pipeline import Pipeline, ist_now
 from .schedule import due, expected_last_bar, load_holidays, parse_hhmm
 
-log = logging.getLogger("tradelite.jobs")
+log = logging.getLogger("tradelens.jobs")
 JOB = "daily"
 
 
@@ -211,7 +211,7 @@ def worker_loop(sf: sessionmaker[Session], settings: Settings, provider: DataPro
                 res = run_daily(sf, settings, provider, broker, risk, notifier, source=source, clock=clock, holidays=holidays)
                 if res["status"] == "failed" and len(runs) + 1 >= 3:
                     notifier.send(Alert("critical", "Daily run gave up after 3 attempts", "No scan happened today. Fix the cause, "
-                                        "then run `tradelite run-daily` by hand."))
+                                        "then run `tradelens run-daily` by hand."))
             for _ in range(int(poll_seconds)):
                 if stop["now"]:
                     break

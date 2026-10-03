@@ -1,5 +1,5 @@
-from tradelite.domain import AccountState, Side, Signal
-from tradelite.risk.engine import RiskConfig, RiskEngine, position_size
+from tradelens.domain import AccountState, Side, Signal
+from tradelens.risk.engine import RiskConfig, RiskEngine, position_size
 from conftest import buy_signal
 
 

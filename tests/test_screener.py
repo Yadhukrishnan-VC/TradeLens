@@ -8,18 +8,18 @@ from sqlalchemy import select
 
 from conftest import FixedProvider, fresh_engine
 from test_features import _edge_frame, _mark_proven
-from tradelite.api.main import create_app
-from tradelite.broker.paper import PaperBroker
-from tradelite.config import Settings
-from tradelite.data.live import YahooLive, aggregate_today
-from tradelite.data.synthetic import make_bars
-from tradelite.db import make_session_factory
-from tradelite.models import LiveMatchRow, StrategyConfigRow, StrategyFitRow
-from tradelite.risk.engine import RiskEngine
-from tradelite.services import screener
-from tradelite.services.notify import TelegramNotifier
-from tradelite.services.pipeline import Pipeline
-from tradelite.strategies import registry
+from tradelens.api.main import create_app
+from tradelens.broker.paper import PaperBroker
+from tradelens.config import Settings
+from tradelens.data.live import YahooLive, aggregate_today
+from tradelens.data.synthetic import make_bars
+from tradelens.db import make_session_factory
+from tradelens.models import LiveMatchRow, StrategyConfigRow, StrategyFitRow
+from tradelens.risk.engine import RiskEngine
+from tradelens.services import screener
+from tradelens.services.notify import TelegramNotifier
+from tradelens.services.pipeline import Pipeline
+from tradelens.strategies import registry
 
 
 class FakeLive:
@@ -34,7 +34,7 @@ class FakeLive:
         return {s: b for s, b in self.bars.items() if s in symbols}
 
 
-from tradelite.services.alerts import RecordingNotifier as Recorder   # the app's real alert type: Alert objects
+from tradelens.services.alerts import RecordingNotifier as Recorder   # the app's real alert type: Alert objects
 
 
 def _bar_of(frame, i):

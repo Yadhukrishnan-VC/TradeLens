@@ -8,20 +8,20 @@ import pytest
 from conftest import FixedProvider, fresh_engine, make_df
 from fastapi.testclient import TestClient
 
-from tradelite.api.auth import MIN_TOKEN_LEN, is_public
-from tradelite.api.main import create_app
-from tradelite.broker.paper import PaperBroker
-from tradelite.config import Settings
-from tradelite.data.synthetic import DemoProvider, make_bars
-from tradelite.db import make_session_factory
-from tradelite.domain import AccountState, Side
-from tradelite.models import AlertRow, JobRunRow, PositionRow
-from tradelite.risk.engine import RiskEngine
-from tradelite.services import jobs
-from tradelite.services.alerts import (Alert, MultiNotifier, RecordingNotifier, StoredNotifier, TelegramNotifier,
+from tradelens.api.auth import MIN_TOKEN_LEN, is_public
+from tradelens.api.main import create_app
+from tradelens.broker.paper import PaperBroker
+from tradelens.config import Settings
+from tradelens.data.synthetic import DemoProvider, make_bars
+from tradelens.db import make_session_factory
+from tradelens.domain import AccountState, Side
+from tradelens.models import AlertRow, JobRunRow, PositionRow
+from tradelens.risk.engine import RiskEngine
+from tradelens.services import jobs
+from tradelens.services.alerts import (Alert, MultiNotifier, RecordingNotifier, StoredNotifier, TelegramNotifier,
                                        WebhookNotifier, build_notifier)
-from tradelite.services.pipeline import Pipeline
-from tradelite.services.schedule import (due, expected_last_bar, is_trading_day, load_holidays, parse_hhmm,
+from tradelens.services.pipeline import Pipeline
+from tradelens.services.schedule import (due, expected_last_bar, is_trading_day, load_holidays, parse_hhmm,
                                          previous_trading_day)
 
 TOKEN = "t" * 32

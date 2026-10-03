@@ -13,7 +13,7 @@ from .strategies import registry
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="tradelite")
+    ap = argparse.ArgumentParser(prog="tradelens")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("strategies", help="list available strategies")
     bt = sub.add_parser("backtest", help="backtest one strategy on one symbol")
@@ -92,11 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         print(new_token())
         return 0
     if a.cmd == "migrate":
-        from tradelite.db import make_engine
-        engine = make_engine("sqlite:///tradelite.db")
+        from tradelens.db import make_engine
+        engine = make_engine("sqlite:///tradelens.db")
         from alembic import command
         from alembic.config import Config
-        alembic_cfg = Config("tradelite/alembic.ini")
+        alembic_cfg = Config("tradelens/alembic.ini")
         command.upgrade(alembic_cfg, "head")
         print("Migrations applied: head")
         return 0

@@ -135,6 +135,7 @@ class Pipeline:
                     if timeframe not in strat.meta.timeframes or len(df) < strat.meta.min_bars + 2:
                         continue
                     verdict, score, adjusted, reason = self.rank_for(name, cfg_name, symbol, timeframe)
+                    rank = verdict
                     if self.require_fit and verdict != "proven":
                         continue
                     prep = strat.prepare(df)

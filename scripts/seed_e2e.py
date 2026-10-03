@@ -2,10 +2,10 @@
 import sys
 from datetime import datetime
 
-from tradelite.data.synthetic import make_bars
-from tradelite.db import make_engine, make_session_factory
-from tradelite.models import LiveMatchRow, OrderRow, SignalRow, StrategyFitRow, WatchRow
-from tradelite.services.screener import ist_now
+from tradelens.data.synthetic import make_bars
+from tradelens.db import make_engine, make_session_factory
+from tradelens.models import LiveMatchRow, OrderRow, SignalRow, StrategyFitRow, WatchRow
+from tradelens.services.screener import ist_now
 
 url = sys.argv[1] if len(sys.argv) > 1 else "sqlite:///e2e.db"
 df = make_bars("DEMO1")

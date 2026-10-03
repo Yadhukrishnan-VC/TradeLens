@@ -4,17 +4,17 @@ import pytest
 from conftest import FixedProvider, fresh_engine, make_df
 from fastapi.testclient import TestClient
 
-from tradelite.api.main import create_app
-from tradelite.backtest.benchmark import buy_and_hold_curve, compare, equal_weight_curve
-from tradelite.backtest.costs import CostModel
-from tradelite.backtest.metrics import curve_stats
-from tradelite.backtest.portfolio import run_portfolio_backtest
-from tradelite.config import Settings
-from tradelite.data.universe import IntervalUniverse, LiquidityUniverse, StaticUniverse, survivorship_report
-from tradelite.db import make_session_factory
-from tradelite.domain import Side, Signal
-from tradelite.risk.engine import RiskConfig, RiskEngine
-from tradelite.strategies.base import Strategy, StrategyMeta
+from tradelens.api.main import create_app
+from tradelens.backtest.benchmark import buy_and_hold_curve, compare, equal_weight_curve
+from tradelens.backtest.costs import CostModel
+from tradelens.backtest.metrics import curve_stats
+from tradelens.backtest.portfolio import run_portfolio_backtest
+from tradelens.config import Settings
+from tradelens.data.universe import IntervalUniverse, LiquidityUniverse, StaticUniverse, survivorship_report
+from tradelens.db import make_session_factory
+from tradelens.domain import Side, Signal
+from tradelens.risk.engine import RiskConfig, RiskEngine
+from tradelens.strategies.base import Strategy, StrategyMeta
 
 ZERO_COST = CostModel(0, 0, 0, 0, 0, 0, 0, 0)
 LOOSE = RiskEngine(RiskConfig(max_position_pct=1.0, min_rr=0.0))

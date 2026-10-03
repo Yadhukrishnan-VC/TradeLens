@@ -7,17 +7,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from conftest import FixedProvider, fresh_engine
-from tradelite.api.main import create_app
-from tradelite.config import Settings
-from tradelite.data.db_provider import DbProvider
-from tradelite.data.sources import YahooSource, clean_bars
-from tradelite.data.synthetic import DemoProvider, make_bars
-from tradelite.db import make_session_factory, normalize_url
-from tradelite.domain import Mode
-from tradelite.models import OrderRow, SignalRow, StrategyFitRow
-from tradelite.risk.engine import RiskConfig, RiskEngine
-from tradelite.services import ingest, lifecycle, presets
-from tradelite.strategies import registry
+from tradelens.api.main import create_app
+from tradelens.config import Settings
+from tradelens.data.db_provider import DbProvider
+from tradelens.data.sources import YahooSource, clean_bars
+from tradelens.data.synthetic import DemoProvider, make_bars
+from tradelens.db import make_session_factory, normalize_url
+from tradelens.domain import Mode
+from tradelens.models import OrderRow, SignalRow, StrategyFitRow
+from tradelens.risk.engine import RiskConfig, RiskEngine
+from tradelens.services import ingest, lifecycle, presets
+from tradelens.strategies import registry
 
 
 @pytest.fixture

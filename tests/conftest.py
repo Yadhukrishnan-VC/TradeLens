@@ -6,12 +6,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tradelite.broker.paper import PaperBroker
-from tradelite.data.synthetic import DemoProvider
-from tradelite.db import make_engine, make_session_factory
-from tradelite.models import Base
-from tradelite.domain import Mode, Side, Signal
-from tradelite.services.pipeline import Pipeline
+from tradelens.broker.paper import PaperBroker
+from tradelens.data.synthetic import DemoProvider
+from tradelens.db import make_engine, make_session_factory
+from tradelens.models import Base
+from tradelens.domain import Mode, Side, Signal
+from tradelens.services.pipeline import Pipeline
 
 
 def make_df(rows: list[tuple[float, float, float, float]], start: str = "2020-01-01", volume: float = 1e6) -> pd.DataFrame:
@@ -65,7 +65,7 @@ def buy_signal(entry=100.0, stop=95.0, target=110.0, symbol="X") -> Signal:
 @pytest.fixture(autouse=True)
 def _fresh_breakers():
     """Circuit breakers are shared per outside service; every test starts with them closed."""
-    from tradelite.services import breaker
+    from tradelens.services import breaker
     breaker.reset_all()
     yield
     breaker.reset_all()

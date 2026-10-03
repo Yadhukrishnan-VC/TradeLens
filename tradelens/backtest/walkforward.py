@@ -100,7 +100,7 @@ def walkforward_validate(
     from ..db import make_engine, make_session_factory
 
     # Get historical price data
-    provider = DataProvider(make_session_factory(make_engine("sqlite:///tradelite.db")))
+    provider = DataProvider(make_session_factory(make_engine("sqlite:///tradelens.db")))
     df = provider.get_bars(symbol, timeframe)
 
     if len(df) < 365:

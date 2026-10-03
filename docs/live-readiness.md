@@ -1,4 +1,4 @@
-# tradelite Paper-Trading Protocol (8-12 weeks)
+# tradelens Paper-Trading Protocol (8-12 weeks)
 
 ## Overview
 
@@ -9,11 +9,11 @@ rejections, slippage, and regime data.
 ## Protocol Phases
 
 ### Phase 1: Initialization (Weeks 1-2)
-- [ ] Set `TRADELITE_DEMO=0` and ensure real NSE data is loaded (`REFRESH_YEARS=15`)
+- [ ] Set `TRADELENS_DEMO=0` and ensure real NSE data is loaded (`REFRESH_YEARS=15`)
 - [ ] Set `API_TOKEN` and configure `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` for alerts
 - [ ] Set `POSTGRES_PASSWORD` in `.env`
 - [ ] Verify `docker compose up` starts successfully with required tokens
-- [ ] Run `python -m tradelite token` and save the token to `.env`
+- [ ] Run `python -m tradelens token` and save the token to `.env`
 - [ ] Set `HOLIDAYS_FILE` and place `data/holidays.txt`
 - [ ] Verify worker uptime > 99% over first 5 trading days
 
@@ -25,7 +25,7 @@ rejections, slippage, and regime data.
 
 ### Phase 3: Strategy Validation (Weeks 4-8)
 - [ ] Run the platform with default strategies on a universe of 20-30 liquid NSE stocks
-- [ ] Generate weekly reports: `tradelite report --weeks N`
+- [ ] Generate weekly reports: `tradelens report --weeks N`
 - [ ] Track these metrics:
   - Trades count and breakdown by strategy/symbol
   - Realised vs expected R (interval low above 0 is a positive sign)
@@ -57,7 +57,7 @@ rejections, slippage, and regime data.
 ## Weekly Report Format
 
 ```
-tradelite report --weeks N
+tradelens report --weeks N
 ```
 
 Delivers:

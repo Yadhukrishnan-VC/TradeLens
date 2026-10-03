@@ -166,7 +166,7 @@ def create_app(
         yield
         screener.stop()
 
-    app = FastAPI(title="tradelite", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="tradelens", version="0.2.0", lifespan=lifespan)
     # Auth BEFORE CORS: CORS is added last, so it stays the outermost layer and answers preflight without a token.
     auth_on = install_auth(app, settings.api_token)
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],

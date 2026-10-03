@@ -1,5 +1,5 @@
 [project]
-name = "tradelite"
+name = "tradelens"
 version = "0.2.0"
 description = "Simple, scalable trading platform: strategies as plugins, honest backtests, risk engine, paper/live brokers"
 requires-python = ">=3.10"
@@ -17,7 +17,7 @@ dependencies = [
 dev = ["pytest>=8", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
-include = ["tradelite*"]
+include = ["tradelens*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

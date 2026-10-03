@@ -27,7 +27,7 @@ class DbProvider:
                        PriceBarRow.close, PriceBarRow.volume)
                 .where(PriceBarRow.symbol == symbol).order_by(PriceBarRow.ts)).all()
         if not rows:
-            raise FileNotFoundError(f"no stored price data for {symbol}. Fetch it first (POST /data/fetch or `tradelite fetch`).")
+            raise FileNotFoundError(f"no stored price data for {symbol}. Fetch it first (POST /data/fetch or `tradelens fetch`).")
         df = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "volume"])
         df["ts"] = pd.to_datetime(df["ts"])
         return validate_bars(df.set_index("ts").astype(float))

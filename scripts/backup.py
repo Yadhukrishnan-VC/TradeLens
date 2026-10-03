@@ -1,9 +1,9 @@
 """Daily backup sidecar for PostgreSQL database.
 
 Usage (from repository root):
-    python -m tradelite backup create     # create a new backup
-    python -m tradelite backup list       # list backups
-    python -m tradelite backup restore    # restore the latest backup
+    python -m tradelens backup create     # create a new backup
+    python -m tradelens backup list       # list backups
+    python -m tradelens backup restore    # restore the latest backup
 
 This script is intended to be run as a cron job or system timer.
 It performs the following:
@@ -39,7 +39,7 @@ def load_config() -> dict[str, Any]:
         with open(CONFIG_FILE) as f:
             return yaml.safe_load(f)
     return {
-        "db_url": os.getenv("DATABASE_URL", "postgresql://tradelite:tradelite@localhost:5432/tradelite"),
+        "db_url": os.getenv("DATABASE_URL", "postgresql://tradelens:tradelens@localhost:5432/tradelens"),
         "backup_dir": str(BACKUP_DIR),
         "retention_days": RETENTION_DAYS,
     }
@@ -122,7 +122,7 @@ def create_backup() -> dict[str, Any]:
 
     # Generate filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_path = Path(backup_dir) / f"tradelite-db-{timestamp}.sql.gz"
+    backup_path = Path(backup_dir) / f"tradelens-db-{timestamp}.sql.gz"
 
     print(f"Creating backup: {backup_path.name}")
     success = dump_database(url, backup_path)
@@ -224,7 +224,7 @@ def main() -> int:
     """Main entry point for the backup script."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="tradelite database backup utility")
+    parser = argparse.ArgumentParser(description="tradelens database backup utility")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # create command
@@ -269,7 +269,7 @@ def print_list(result: list[dict[str, Any]]) -> None:
     print("Existing backups (most recent first):")
     for b in result:
         size_kb = result["size"] // 1024 if "size" in result[0] else 0
-        print(f"  • {b['name']} ({b['created']})"
+        print(f"  • {b['name']} ({b['created']})")
 
 
 def print_restore(result: dict[str, Any]) -> None:

@@ -3,10 +3,10 @@ import pytest
 from sqlalchemy import select
 
 from conftest import FixedProvider, make_df
-from tradelite.domain import Mode
-from tradelite.models import OrderRow, PositionRow, SignalRow
-from tradelite.risk.engine import RiskConfig, RiskEngine
-from tradelite.strategies import registry
+from tradelens.domain import Mode
+from tradelens.models import OrderRow, PositionRow, SignalRow
+from tradelens.risk.engine import RiskConfig, RiskEngine
+from tradelens.strategies import registry
 
 
 def scan_for_signal(pipeline_factory, mode):
@@ -20,7 +20,7 @@ def scan_for_signal(pipeline_factory, mode):
 def edge_provider():
     """A provider whose LAST bar triggers ema_cross/donchian for some symbol: search demo data by
     truncating each DEMO series until the final bar fires a signal."""
-    from tradelite.data.synthetic import make_bars
+    from tradelens.data.synthetic import make_bars
     frames = {}
     for sym in ("DEMO1", "DEMO2", "DEMO3"):
         df = make_bars(sym)

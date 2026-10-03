@@ -16,7 +16,7 @@ import secrets
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-log = logging.getLogger("tradelite.auth")
+log = logging.getLogger("tradelens.auth")
 MIN_TOKEN_LEN = 24
 PUBLIC_EXACT = {"/health", "/"}
 PUBLIC_PREFIX = "/ui"
@@ -37,7 +37,7 @@ def install_auth(app: FastAPI, token: str) -> bool:
         log.warning("API_TOKEN is not set: the API is OPEN. Fine on localhost, never on a network.")
         return False
     if len(token) < MIN_TOKEN_LEN:
-        raise RuntimeError(f"API_TOKEN must be at least {MIN_TOKEN_LEN} characters. Generate one with: python -m tradelite token")
+        raise RuntimeError(f"API_TOKEN must be at least {MIN_TOKEN_LEN} characters. Generate one with: python -m tradelens token")
     expected = token.encode()
 
     @app.middleware("http")

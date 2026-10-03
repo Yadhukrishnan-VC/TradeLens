@@ -1,14 +1,14 @@
 """
-Alembic environment configuration for tradelite.
+Alembic environment configuration for tradelens.
 
 This module is loaded by Alembic when running migrations. To ensure that
-the `tradelite.*` packages are importable, we add the project root to
+the `tradelens.*` packages are importable, we add the project root to
 sys.path based on this file's location.
 """
 import sys
 from pathlib import Path
 
-# Project root is two levels up from this file: tradelite/alembic/env.py
+# Project root is two levels up from this file: tradelens/alembic/env.py
 PROJECT_ROOT = str(Path(__file__).parent.parent.resolve())
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -31,7 +31,7 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-from tradelite.tradelite.models import Base
+from tradelens.tradelens.models import Base
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

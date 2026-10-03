@@ -136,7 +136,7 @@ class PortfolioRunRow(Base):
 
 
 class AlertRow(Base):
-    """Every alert tradelite wanted to send a human, kept whether or not a channel accepted it.
+    """Every alert tradelens wanted to send a human, kept whether or not a channel accepted it.
     The message body is stored (not the destination), so no bot token or webhook URL is persisted."""
     __tablename__ = "alerts"
     id: Mapped[int] = mapped_column(primary_key=True)
