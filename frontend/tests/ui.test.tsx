@@ -1,5 +1,5 @@
 // End-to-end UI test: renders the real React app in jsdom and drives it against a REAL running
-// tradelite server (TL_API). Seed data: one pending order on DEMO1 (see ../../scripts/seed_e2e.py).
+// tradelens server (TL_API). Seed data: one pending order on DEMO1 (see ../../scripts/seed_e2e.py).
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import App from "../src/App";

@@ -14,12 +14,12 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: tradelite
-          POSTGRES_PASSWORD: tradelite
-          POSTGRES_DB: tradelite
+          POSTGRES_USER: tradelens
+          POSTGRES_PASSWORD: tradelens
+          POSTGRES_DB: tradelens
         ports: [5432:5432]
         options: >-
-          --health-cmd pg_isready -U tradelite -d tradelite
+          --health-cmd pg_isready -U tradelens -d tradelens
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -42,7 +42,7 @@ jobs:
 
       - name: Test on PostgreSQL
         env:
-          TEST_DATABASE_URL: postgresql://tradelite:tradelite@localhost:5432/tradelite
+          TEST_DATABASE_URL: postgresql://tradelens:tradelens@localhost:5432/tradelens
         run: |
           pytest --tb=short
 

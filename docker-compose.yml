@@ -3,13 +3,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: tradelite
+      POSTGRES_USER: tradelens
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: tradelite
+      POSTGRES_DB: tradelens
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tradelite -d tradelite"]
+      test: ["CMD-SHELL", "pg_isready -U tradelens -d tradelens"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -22,11 +22,11 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://tradelite:${POSTGRES_PASSWORD:-tradelite}@db:5432/tradelite
+      DATABASE_URL: postgresql://tradelens:${POSTGRES_PASSWORD:-tradelens}@db:5432/tradelens
       DATA_SOURCE: db
       DATA_DIR: /app/data
-      TRADELITE_DEMO: ${TRADELITE_DEMO:-0}
-      TRADELITE_MODE: ${TRADELITE_MODE:-semi_auto}
+      TRADELENS_DEMO: ${TRADELENS_DEMO:-0}
+      TRADELENS_MODE: ${TRADELENS_MODE:-semi_auto}
       STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
       BROKER: paper
       LIVE_SCREENER: ${LIVE_SCREENER:-1}
@@ -38,33 +38,33 @@ services:
       LIVE_INTERVAL_SECONDS: ${LIVE_INTERVAL_SECONDS:-300}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelite token)}
+      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelens token)}
     volumes:
       - ./data:/app/data:ro          # optional: SYMBOL.csv files for `import-csv`
     # Token auth protects the API, but keep it bound to this machine; put HTTPS in front before exposing it.
     ports:
       - "127.0.0.1:8000:8000"
-    command: ["python", "-m", "tradelite", "migrate"]
+    command: ["python", "-m", "tradelens", "migrate"]
 
   # Runs the daily job after market close on trading days. Same image, same database, no published port.
   worker:
     build: .
-    command: ["python", "-m", "tradelite", "migrate", "&&", "python", "-m", "tradelite", "worker"]
+    command: ["python", "-m", "tradelens", "migrate", "&&", "python", "-m", "tradelens", "worker"]
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://tradelite:${POSTGRES_PASSWORD:-tradelite}@db:5432/tradelite
+      DATABASE_URL: postgresql://tradelens:${POSTGRES_PASSWORD:-tradelens}@db:5432/tradelens
       DATA_SOURCE: db
       DATA_DIR: /app/data
-      TRADELITE_DEMO: ${TRADELITE_DEMO:-0}
-      TRADELITE_MODE: ${TRADELITE_MODE:-semi_auto}
+      TRADELENS_DEMO: ${TRADELENS_DEMO:-0}
+      TRADELENS_MODE: ${TRADELENS_MODE:-semi_auto}
       STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
       BROKER: paper
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelite token)}
+      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelens token)}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       HEALTHCHECK_PING_URL: ${HEALTHCHECK_PING_URL:-}
       DAILY_RUN_AT: ${DAILY_RUN_AT:-16:30}
@@ -76,17 +76,17 @@ services:
   # Runs the daily job after market close on trading days. Same image, same database, no published port.
   worker:
     build: .
-    command: ["python", "-m", "tradelite", "worker"]
+    command: ["python", "-m", "tradelens", "worker"]
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://tradelite:${POSTGRES_PASSWORD:-tradelite}@db:5432/tradelite
+      DATABASE_URL: postgresql://tradelens:${POSTGRES_PASSWORD:-tradelens}@db:5432/tradelens
       DATA_SOURCE: db
       DATA_DIR: /app/data
-      TRADELITE_DEMO: ${TRADELITE_DEMO:-0}
-      TRADELITE_MODE: ${TRADELITE_MODE:-semi_auto}
+      TRADELENS_DEMO: ${TRADELENS_DEMO:-0}
+      TRADELENS_MODE: ${TRADELENS_MODE:-semi_auto}
       STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
       BROKER: paper
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
