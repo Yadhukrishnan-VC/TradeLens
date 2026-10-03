@@ -13,11 +13,12 @@ from ..broker.base import Broker
 from ..data.base import DataProvider
 from ..domain import AccountState, Mode, Side, Signal
 from ..exits import check_exit
-from ..models import Account, OrderRow, PositionRow, SignalRow, StrategyFitRow
+from ..models import Account, OrderRow, PositionAlertRow, PositionRow, SignalRow, StrategyFitRow, WatchRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
-from . import presets, ranking
+from . import context, events, gate, lifecycle, presets, quality, ranking
 from .alerts import Alert
+from .gate import GateConfig
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -40,6 +41,9 @@ class Pipeline:
         require_fit: bool = False,
         clock=ist_now,
         notifier: Notifier | None = None,
+        gate: GateConfig | None = None,
+        benchmark: str = "",
+        stale_check: bool = False,
     ) -> None:
         self.s, self.provider, self.broker = session, provider, broker
         self.risk = risk or RiskEngine()
@@ -47,6 +51,10 @@ class Pipeline:
         self.mode, self.require_fit, self.clock = mode, require_fit, clock
         self._starting_capital = starting_capital
         self.notifier = notifier
+        self.gate_cfg = gate or GateConfig()      # default: off, so a bare Pipeline behaves exactly as before
+        self.benchmark = benchmark
+        self.stale_check = stale_check            # flag symbols whose last bar is older than the universe's newest bar
+        self.last_watch: list[dict] = []          # setups close to triggering, found by the last scan
 
     # ---------- account ----------
     def account(self) -> Account:
@@ -101,18 +109,28 @@ class Pipeline:
     # ---------- scan ----------
     def scan(self, symbols: list[str] | None = None, strategy_names: list[str] | None = None,
              timeframe: str = "1d", use_presets: bool = True) -> list[SignalRow]:
-        """Run every strategy (default params + the user's saved presets) on every symbol. Signals
-        whose strategy+config has PROVEN itself on that symbol are ranked first, so they also get
-        first claim on limited position slots and capital."""
+        """Run every switched-on strategy (built-in settings + the user's saved presets) on every symbol.
+        Signals whose strategy+config has PROVEN itself on that symbol are ranked first, so they also get
+        first claim on limited position slots and capital. Every signal records the data quality, the market
+        regime and the gate's verdict; setups one step from triggering are saved as the watchlist."""
         catalog = registry.discover()
         names = strategy_names or sorted(catalog)
         presets_by = presets.for_strategies(self.s, names) if use_presets else {n: [] for n in names}
-        found: list[tuple[Signal, str, str, float]] = []   # (signal, config_name, rank, score)
-        for symbol in symbols or self.provider.symbols():
-            df = self.provider.get_bars(symbol, timeframe)
+        states = lifecycle.states_for(self.s)
+        syms = symbols or self.provider.symbols()
+        frames = {sym: self.provider.get_bars(sym, timeframe) for sym in syms}
+        latest = max((df.index[-1].date() for df in frames.values() if len(df)), default=None) if self.stale_check else None
+        regime = context.compute_regime(self.provider, self.benchmark, syms, frames=frames)
+        held = self.account_state().open_symbols
+        found: list = []     # (signal, config_name, rank, score, quality, meta)
+        watched: list = []
+        for symbol, df in frames.items():
+            qual = quality.assess(df, latest_date=latest)
             for name in names:
                 configs = [(presets.DEFAULT, {})] + [(r.name, r.params) for r in presets_by.get(name, [])]
                 for cfg_name, params in configs:
+                    if not lifecycle.is_scanned(states, name, cfg_name):     # draft and retired are never scanned
+                        continue
                     strat = catalog[name](**params)
                     if timeframe not in strat.meta.timeframes or len(df) < strat.meta.min_bars + 2:
                         continue
@@ -120,19 +138,56 @@ class Pipeline:
                     if self.require_fit and verdict != "proven":
                         continue
                     prep = strat.prepare(df)
-                    sig = strat.on_bar(prep, len(prep) - 1, symbol)
+                    last = len(prep) - 1
+                    sig = strat.on_bar(prep, last, symbol)
                     if sig is not None:
-                        found.append((sig, cfg_name, verdict, score))
+                        found.append((sig, cfg_name, rank, score, qual, strat.meta))
+                    elif symbol not in held:
+                        w = strat.watch(prep, last, symbol)
+                        if w is not None:
+                            watched.append((name, cfg_name, symbol, df.index[-1].to_pydatetime(), float(df["close"].iloc[-1]), w, rank, score))
         found.sort(key=lambda f: (f[2] != "proven", -f[3]))   # proven first, best profit factor first
         created: list[SignalRow] = []
-        for sig, cfg_name, verdict, score in found:
-            row = self._store_signal(sig, cfg_name, verdict, score)
+        for sig, cfg_name, rank, score, qual, meta in found:
+            row = self._store_signal(sig, cfg_name, rank, score)
             if row is None:      # already seen this exact signal
                 continue
+            self._decorate(row, sig, qual, meta, regime)
             self._route(row, sig)
             created.append(row)
+        self.last_watch = self._store_watch(watched)
         self.s.commit()
         return created
+
+    def _decorate(self, row: SignalRow, sig: Signal, qual, meta, regime) -> None:
+        """Attach what a human needs to judge the signal: data quality, upcoming events, regime, gate verdict."""
+        evs = events.upcoming(self.s, sig.symbol, sig.ts.date(), self.gate_cfg.event_window_days)
+        off_regime = bool(meta.regimes) and regime.trend != "unknown" and regime.trend not in meta.regimes
+        flags = list(qual.flags) + [f"EVENT:{e.kind}" for e in evs[:2]] + (["OFF_REGIME"] if off_regime else [])
+        row.quality, row.flags = qual.level, ",".join(flags)[:120]
+        row.regime = regime.label if regime.label != "unknown" else ""
+        fit_at = self.s.scalar(select(StrategyFitRow.updated_at).where(
+            StrategyFitRow.strategy == sig.strategy, StrategyFitRow.config_name == row.config_name,
+            StrategyFitRow.symbol == sig.symbol))
+        g = gate.evaluate(self.gate_cfg, state=lifecycle.state_of(self.s, sig.strategy, row.config_name), rank=row.rank,
+                          fit_updated_at=fit_at, today=self.clock().date(), has_event=bool(evs), off_regime=off_regime)
+        row.gate, row.gate_reason = g.verdict, g.text[:80]
+
+    def _store_watch(self, watched: list) -> list[dict]:
+        out: list[dict] = []
+        for name, cfg, sym, bar_ts, close, w, rank, score in watched:
+            if self.s.scalar(select(WatchRow.id).where(WatchRow.strategy == name, WatchRow.config_name == cfg,
+                                                       WatchRow.symbol == sym, WatchRow.bar_ts == bar_ts)):
+                continue
+            self.s.add(WatchRow(strategy=name, config_name=cfg, symbol=sym, bar_ts=bar_ts, close=close,
+                                trigger=w.trigger, distance_pct=w.distance_pct, note=w.note[:200], created_at=self.clock()))
+            out.append({"symbol": sym, "strategy": name, "config_name": cfg, "trigger": w.trigger,
+                        "distance_pct": w.distance_pct, "note": w.note, "rank": rank, "score": score})
+        out.sort(key=lambda d: (d["rank"] != "proven", abs(d["distance_pct"]) if d["distance_pct"] is not None else 99.0))
+        return out
+
+    def regime_now(self) -> context.Regime:
+        return context.compute_regime(self.provider, self.benchmark)
 
     def rank_for(self, strategy: str, config_name: str, symbol: str, timeframe: str = "1d") -> tuple[str, float, bool, str]:
         return ranking.rank_for(self.s, strategy, config_name, symbol, timeframe)
@@ -164,6 +219,12 @@ class Pipeline:
         return hashlib.sha1(key.encode()).hexdigest()[:16]
 
     def _route(self, row: SignalRow, sig: Signal) -> None:
+        if row.quality == "bad":     # never open a trade from data we do not trust (the signal stays visible)
+            row.status, row.reason = "rejected", "DATA_QUALITY"
+            return
+        if row.gate == "block":      # the gate holds it back: recorded and shown, but no order follows
+            row.status, row.reason = "gated", (row.gate_reason.split(",")[0] or "GATE")
+            return
         decision = self.risk.evaluate(sig, self.account_state())
         if not decision.approved:
             row.status, row.reason = "rejected", decision.reason
@@ -261,3 +322,42 @@ class Pipeline:
                 break
         self.s.commit()
         return closed
+
+    # ---------- strategy advice on open positions (EXIT / REDUCE; never sends an order) ----------
+    def review_positions(self) -> list[PositionAlertRow]:
+        """Ask each strategy whether the idea behind an open position still holds. Stops and targets keep closing
+        positions on their own; this only tells a human when a strategy would get out earlier. Idempotent per bar."""
+        catalog = registry.discover()
+        created: list[PositionAlertRow] = []
+        for pos in self.s.scalars(select(PositionRow).where(PositionRow.closed_at.is_(None))).all():
+            cls = catalog.get(pos.strategy)
+            if cls is None or Side(pos.side) is not Side.BUY:
+                continue
+            try:
+                df = self.provider.get_bars(pos.symbol)
+            except (FileNotFoundError, ValueError, KeyError):
+                continue
+            if df.index[-1].to_pydatetime() <= pos.signal_bar_ts:     # no bar since the entry signal
+                continue
+            strat = cls()
+            prep = strat.prepare(df)
+            hint = strat.exit_hint(prep, len(prep) - 1, pos.entry_price)
+            if hint is None:
+                continue
+            bar_ts = df.index[-1].to_pydatetime()
+            if self.s.scalar(select(PositionAlertRow.id).where(PositionAlertRow.position_id == pos.id,
+                                                               PositionAlertRow.bar_ts == bar_ts,
+                                                               PositionAlertRow.action == hint.action)):
+                continue
+            price = float(df["close"].iloc[-1])
+            row = PositionAlertRow(position_id=pos.id, symbol=pos.symbol, strategy=pos.strategy, action=hint.action,
+                                   reason=hint.reason[:200], price=price, bar_ts=bar_ts, created_at=self.clock())
+            self.s.add(row)
+            created.append(row)
+            pnl = (price - pos.entry_price) * pos.qty
+            self._alert("warning" if hint.action == "EXIT" else "info",
+                        f"{pos.strategy} says {hint.action} {pos.symbol} (~{price:.2f})",
+                        f"{hint.reason}. Open P&L about {pnl:+,.0f}. Your stop {pos.stop:.2f} is still in force; "
+                        "nothing was sold. Decide yourself.")
+        self.s.commit()
+        return created

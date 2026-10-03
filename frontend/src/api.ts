@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   AccountInfo, BacktestResponse, BacktestRun, Fit, Health, OrderRow, PositionRow, RiskConfig,
   ScanMode, SignalRow, StrategyConfig, StrategyInfo, TrackRecord, Coverage, FetchResult, ScreenerData, ScreenerRun, BatchResult,
+  ContextData, WatchItem, PositionAlert, LifecycleRow, LifecycleState, EventItem,
 } from "./types";
 
 export class ApiError extends Error {
@@ -61,6 +62,17 @@ export const api = {
   deleteStrategyConfig: (id: number) => req<{ deleted: number }>(`/strategy-configs/${id}`, { method: "DELETE" }),
   trackRecord: () => req<TrackRecord>("/track-record"),
   screener: () => req<ScreenerData>("/screener"),
+  context: () => req<ContextData>("/context"),
+  watchlist: () => req<{ as_of: string | null; items: WatchItem[] }>("/watchlist"),
+  positionAlerts: () => req<PositionAlert[]>("/position-alerts"),
+  reviewPositions: () => post<PositionAlert[]>("/position-alerts/review"),
+  ackPositionAlert: (id: number) => post<PositionAlert>(`/position-alerts/${id}/ack`),
+  lifecycle: () => req<LifecycleRow[]>("/lifecycle"),
+  setLifecycle: (b: { strategy: string; config_name: string; state: LifecycleState; note?: string }) => post<unknown>("/lifecycle", b),
+  events: () => req<EventItem[]>("/events"),
+  addEvent: (b: { symbol: string; day: string; kind: string; note?: string }) => post<EventItem>("/events", b),
+  importEvents: (csv: string) => post<{ imported: number; problems: string[] }>("/events/import", { csv }),
+  deleteEvent: (id: number) => req<{ deleted: number }>(`/events/${id}`, { method: "DELETE" }),
   runScreener: (force = false) => post<ScreenerRun>(`/screener/run?force=${force}`, {}),
   backtestBatch: (b: { rr?: number }) => post<BatchResult>("/backtests/batch", b),
   coverage: () => req<Coverage[]>("/data/coverage"),
