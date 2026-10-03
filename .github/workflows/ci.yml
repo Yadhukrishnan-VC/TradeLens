@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, master, screener]
+  pull_request:
+    branches: [dev, master, screener]
+
+jobs:
+  test:
+    name: Test on SQLite + PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tradelite
+          POSTGRES_PASSWORD: tradelite
+          POSTGRES_DB: tradelite
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready -U tradelite -d tradelite
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install -e ".[dev]"
+
+      - name: Test on SQLite
+        run: |
+          pytest --tb=short
+
+      - name: Test on PostgreSQL
+        env:
+          TEST_DATABASE_URL: postgresql://tradelite:tradelite@localhost:5432/tradelite
+        run: |
+          pytest --tb=short
+
+      - name: Frontend build
+        working-directory: ./frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Vitest end-to-end test
+        working-directory: ./frontend
+        run: |
+          npm run test:e2e

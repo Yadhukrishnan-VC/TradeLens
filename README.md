@@ -9,7 +9,7 @@ cp .env.example .env            # set POSTGRES_PASSWORD
 docker compose up --build       # starts PostgreSQL + the app
 ```
 Open **http://localhost:8000/**. The database lives in the `pgdata` volume, so it survives restarts.
-The app is bound to `127.0.0.1` only because the API has no login yet; do not expose it publicly.
+The app is bound to `127.0.0.1` only because the API requires a bearer token (`API_TOKEN`); do not expose it publicly without a reverse proxy.
 
 Then, in the dashboard, open **Data** and click *Fetch prices* (or use the command line):
 ```bash

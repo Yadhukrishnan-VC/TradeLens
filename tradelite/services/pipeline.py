@@ -134,8 +134,8 @@ class Pipeline:
                     strat = catalog[name](**params)
                     if timeframe not in strat.meta.timeframes or len(df) < strat.meta.min_bars + 2:
                         continue
-                    rank, score = self.rank_for(name, cfg_name, symbol, timeframe)
-                    if self.require_fit and rank != "proven":
+                    verdict, score, adjusted, reason = self.rank_for(name, cfg_name, symbol, timeframe)
+                    if self.require_fit and verdict != "proven":
                         continue
                     prep = strat.prepare(df)
                     last = len(prep) - 1
@@ -189,7 +189,7 @@ class Pipeline:
     def regime_now(self) -> context.Regime:
         return context.compute_regime(self.provider, self.benchmark)
 
-    def rank_for(self, strategy: str, config_name: str, symbol: str, timeframe: str = "1d") -> tuple[str, float]:
+    def rank_for(self, strategy: str, config_name: str, symbol: str, timeframe: str = "1d") -> tuple[str, float, bool, str]:
         return ranking.rank_for(self.s, strategy, config_name, symbol, timeframe)
 
     def _store_signal(self, sig: Signal, config_name: str = "default", rank: str = "unproven",

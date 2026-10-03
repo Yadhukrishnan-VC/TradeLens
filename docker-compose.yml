@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: tradelite
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradelite}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: tradelite
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -33,11 +33,40 @@ services:
       LIVE_INTERVAL_SECONDS: ${LIVE_INTERVAL_SECONDS:-300}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelite token)}
     volumes:
       - ./data:/app/data:ro          # optional: SYMBOL.csv files for `import-csv`
     # Token auth protects the API, but keep it bound to this machine; put HTTPS in front before exposing it.
     ports:
       - "127.0.0.1:8000:8000"
+    command: ["python", "-m", "tradelite", "migrate"]
+
+  # Runs the daily job after market close on trading days. Same image, same database, no published port.
+  worker:
+    build: .
+    command: ["python", "-m", "tradelite", "migrate", "&&", "python", "-m", "tradelite", "worker"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tradelite:${POSTGRES_PASSWORD:-tradelite}@db:5432/tradelite
+      DATA_SOURCE: db
+      DATA_DIR: /app/data
+      TRADELITE_DEMO: ${TRADELITE_DEMO:-0}
+      TRADELITE_MODE: ${TRADELITE_MODE:-semi_auto}
+      STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
+      BROKER: paper
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelite token)}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      HEALTHCHECK_PING_URL: ${HEALTHCHECK_PING_URL:-}
+      DAILY_RUN_AT: ${DAILY_RUN_AT:-16:30}
+      HOLIDAYS_FILE: ${HOLIDAYS_FILE:-}
+      REFRESH_YEARS: ${REFRESH_YEARS:-5}
+    volumes:
+      - ./data:/app/data:ro          # put holidays.txt here and set HOLIDAYS_FILE=/app/data/holidays.txt
 
   # Runs the daily job after market close on trading days. Same image, same database, no published port.
   worker:

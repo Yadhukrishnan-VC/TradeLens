@@ -34,7 +34,9 @@ class Trade:
     gross_pnl: float
     costs: float
     net_pnl: float
-    reason: str
+    risk_amount: float | None = None    # risk at entry (for r-multiple)
+    r_multiple: float | None = None     # net_pnl / risk_amount
+    reason: str = ""                    # reason for exit (stop, target, end_of_data, etc.)
 
 
 @dataclass
@@ -55,6 +57,7 @@ class _Open:
     entry_price: float
     entry_ts: datetime
     entry_cost: float
+    stop: float | None = None
 
 
 def run_backtest(
@@ -66,6 +69,8 @@ def run_backtest(
     risk: RiskEngine | None = None,
     cost_model: CostModel | None = None,
     slippage_bps: float = 5.0,
+    impact_k: float = 10.0,           # impact coefficient for square-root formula
+    adv20_value: float | None = None, # ADV20 value for impact calc; None = no cap
 ) -> BacktestResult:
     risk = risk or RiskEngine(RiskConfig())
     cost_model = cost_model or DELIVERY_EQUITY
@@ -90,13 +95,19 @@ def run_backtest(
         # 1) fill the signal decided on the previous bar's close, at this bar's open
         if pending is not None and pos is None:
             sig, pending = pending, None
-            fill = o[i] * (1 + slip * sig.side.sign)
+            # Liquidity-aware slippage: base_bps + impact_k * sqrt(order_value / ADV20_value)
+            if adv20_value is not None and adv20_value > 0:
+                order_value = sig.qty * sig.entry  # simplified: qty * entry_price
+                impact_bps = slip * 10_000 + impact_k * math.sqrt(max(order_value / adv20_value, 1e-8))
+                fill = o[i] * (1 + impact_bps / 10_000 * sig.side.sign)
+            else:
+                fill = o[i] * (1 + slip * sig.side.sign)
             live_sig = replace(sig, entry=fill)
             state = AccountState(equity=cash, cash=cash, open_positions=0, exposure=0.0, realized_pnl_today=0.0)
             decision = risk.evaluate(live_sig, state)
             if decision.approved:
                 qty = decision.qty
-                pos = _Open(sig, qty, fill, idx[i].to_pydatetime(), cost_model.cost(sig.side, fill, qty))
+                pos = _Open(sig, qty, fill, idx[i].to_pydatetime(), cost_model.cost(sig.side, fill, qty), stop=sig.stop)
             else:
                 skip(decision.reason)
 
@@ -136,21 +147,72 @@ def _close(pos: _Open, px: float, ts: datetime, reason: str, cm: CostModel, symb
     s = pos.signal
     gross = (px - pos.entry_price) * pos.qty * s.side.sign
     costs = pos.entry_cost + cm.cost(s.side.opposite, px, pos.qty)
+    # risk_amount is the initial risk at entry: abs(entry_price - stop) * qty
+    risk_amount = abs(pos.entry_price - pos.stop) * pos.qty if pos.stop is not None else None
+    r_multiple = (gross - costs) / risk_amount if risk_amount and risk_amount != 0 else None
     return Trade(symbol, s.strategy, s.side.value, pos.entry_ts, pos.entry_price, ts, px,
-                 pos.qty, gross, costs, gross - costs, reason)
+                 pos.qty, gross, costs, gross - costs, risk_amount=risk_amount, r_multiple=r_multiple,
+                 reason=reason)
+
+
+def _bootstrap_ci_r(trades: list, n_bootstrap: int = 10_000, block_size: int = 30) -> tuple[float, float]:
+    """Seeded 95% bootstrap CI on expectancy in R, block bootstrap by month.
+
+    Returns (ci_low, ci_high). If not enough trades, returns (nan, nan).
+    """
+    if not trades or len(trades) < 10:
+        return (float("nan"), float("nan"))
+
+    # Use block bootstrap: resample contiguous blocks of `block_size` trades
+    # to preserve within-block dependence (e.g., same-day correlation)
+    rng = np.random.default_rng(42)  # deterministic seed
+    n = len(trades)
+    block_size = min(block_size, n)
+    n_blocks = n // block_size
+
+    # Collect r_multiple values
+    r_vals = np.array([t.r_multiple for t in trades if t.r_multiple is not None])
+    if len(r_vals) < 3:
+        return (float("nan"), float("nan"))
+
+    # Resample blocks with replacement
+    bootstrap_means = []
+    for _ in range(n_bootstrap):
+        # Reconstruct series from blocks
+        resampled = []
+        for b in range(n_blocks):
+            start = b * block_size
+            end = start + block_size
+            # pick a random block
+            rand_start = rng.integers(0, n_blocks)
+            block = r_vals[rand_start * block_size : (rand_start + 1) * block_size]
+            resampled.extend(block.tolist())
+        # fill remaining
+        remaining = n - len(resampled)
+        if remaining > 0:
+            extra = rng.choice(r_vals, size=remaining, replace=True)
+            resampled.extend(extra.tolist())
+        bootstrap_means.append(np.mean(resampled) if resampled else 0.0)
+
+    lower = np.percentile(bootstrap_means, 2.5)
+    upper = np.percentile(bootstrap_means, 97.5)
+    return (float(lower), float(upper))
 
 
 def evaluate_fit(
-    strategy: Strategy, df: pd.DataFrame, symbol: str, *, split: float = 0.7, min_trades: int = 30, **kw
+    strategy: Strategy, df: pd.DataFrame, symbol: str, *, split: float = 0.7, min_trades: int = 30, n_bootstrap: int = 10_000, **kw
 ) -> dict:
     """Stability check, NOT proof of edge: one full run, trades split by entry time into an
     early and a late segment. 'candidate' needs enough trades AND positive expectancy with
-    profit factor > 1.2 in BOTH segments. Everything else needs more data or has no edge."""
+    profit factor > 1.2 in BOTH segments. Everything else has no edge."""
     res = run_backtest(strategy, df, symbol, **kw)
     cut = df.index[int(len(df) * split)]
     early = [t for t in res.trades if t.entry_ts < cut]
     late = [t for t in res.trades if t.entry_ts >= cut]
     m_all, m_early, m_late = res.metrics, compute_metrics(early), compute_metrics(late)
+
+    # Bootstrap CI on overall expectancy in R
+    ci_low, ci_high = _bootstrap_ci_r(res.trades, n_bootstrap)
 
     def ok(m: dict) -> bool:
         pf = m["profit_factor"]
@@ -163,4 +225,5 @@ def evaluate_fit(
     else:
         verdict = "no_edge"
     return {"verdict": verdict, "all": m_all, "early": m_early, "late": m_late,
-            "split_at": cut.isoformat(), "skipped": res.skipped, "result": res}
+            "split_at": cut.isoformat(), "skipped": res.skipped, "result": res,
+            "ci_low": ci_low, "ci_high": ci_high}

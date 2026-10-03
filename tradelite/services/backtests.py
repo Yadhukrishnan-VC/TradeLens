@@ -1,19 +1,30 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from ..backtest.costs import CostModel
 from ..backtest.engine import evaluate_fit
 from ..data.base import DataProvider
-from ..models import BacktestRunRow, StrategyFitRow
+from ..models import BacktestRunRow, TrialsRow, StrategyFitRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
 from . import lifecycle, presets
+
+
+def _params_hash(params: dict[str, Any] | None) -> str:
+    """Deterministic hash of params dict for trials tracking."""
+    if params is None:
+        return hashlib.sha256(b"default").hexdigest()
+    try:
+        return hashlib.sha256(str(sorted(params.items()))).hexdigest()
+    except TypeError:
+        # params contains unhashable values; use repr as fallback
+        return hashlib.sha256(repr(params).encode()).hexdigest()
 
 
 def run_and_store(
@@ -30,7 +41,10 @@ def run_and_store(
     slippage_bps: float = 5.0,
     config_name: str = "default",
 ) -> dict:
-    """Backtest one strategy on one symbol, persist the run and update the strategy<->symbol map."""
+    """Backtest one strategy on one symbol, persist the run and update the strategy<->symbol map.
+
+    Also records a row in the trials table for multiple-testing correction.
+    """
     if config_name != "default":
         params = {**presets.resolve(session, strategy_name, config_name), **(params or {})}
     elif params:
@@ -56,6 +70,35 @@ def run_and_store(
                          params=res.params, metrics={**res.metrics, "verdict": fit["verdict"]},
                          trades=trades, created_at=now)
     session.add(run)
+
+    # --- record trial ---
+    params_hash = _params_hash(params)
+    trial = session.scalar(select(TrialsRow).where(
+        TrialsRow.strategy == strategy_name,
+        TrialsRow.config_name == config_name,
+        TrialsRow.symbol == symbol,
+        TrialsRow.params_hash == params_hash,
+        TrialsRow.run_at == now,
+    ))
+    if trial is None:
+        trial = TrialsRow(
+            strategy=strategy_name,
+            config_name=config_name,
+            symbol=symbol,
+            params_hash=params_hash,
+            run_at=now,
+            n_trades=res.metrics["n_trades"],
+            expectancy=res.metrics["expectancy"],
+        )
+        session.add(trial)
+    else:
+        # increment n_trades and update expectancy (accumulate)
+        trial.n_trades += res.metrics["n_trades"]
+        if trial.expectancy is not None and res.metrics["expectancy"] is not None:
+            trial.expectancy = (trial.expectancy + res.metrics["expectancy"]) / 2
+        elif res.metrics["expectancy"] is not None:
+            trial.expectancy = res.metrics["expectancy"]
+    # ---------------------------------------
 
     row = session.scalar(select(StrategyFitRow).where(
         StrategyFitRow.strategy == strategy_name, StrategyFitRow.config_name == config_name,

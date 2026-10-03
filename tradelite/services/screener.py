@@ -94,7 +94,7 @@ def run_cycle(sf: sessionmaker[Session], provider: DataProvider, source: LiveSou
                     if sig is None:
                         continue
                     hits.add((name, cfg_name))
-                    rank, score = ranking.rank_for(s, name, cfg_name, sym)
+                    verdict, score, adjusted, reason = ranking.rank_for(s, name, cfg_name, sym)
                     decision = risk.evaluate(sig, state)
                     row = s.scalar(select(LiveMatchRow).where(
                         LiveMatchRow.strategy == name, LiveMatchRow.config_name == cfg_name,
@@ -106,7 +106,7 @@ def run_cycle(sf: sessionmaker[Session], provider: DataProvider, source: LiveSou
                         new_rows.append(row)
                     row.status, row.side, row.last_seen = "live", sig.side.value, now
                     row.entry, row.stop, row.target, row.rr = sig.entry, sig.stop, sig.target, sig.rr
-                    row.rank, row.rank_score = rank, score
+                    row.rank, row.rank_score = verdict, score
                     row.suggested_qty, row.fit = (decision.qty if decision.approved else 0), decision.reason
             for old in s.scalars(select(LiveMatchRow).where(
                     LiveMatchRow.symbol == sym, LiveMatchRow.trading_day == today, LiveMatchRow.status == "live")).all():

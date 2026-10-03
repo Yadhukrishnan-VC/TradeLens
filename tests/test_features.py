@@ -113,7 +113,8 @@ def test_proven_signal_wins_the_last_position_slot(pipeline_factory, session):
 def test_rank_matches_the_exact_config_only(pipeline_factory, session):
     _mark_proven(session, "macd_cross", "default", "AAA")
     p = pipeline_factory(Mode.SIGNAL_ONLY)
-    assert p.rank_for("macd_cross", "default", "AAA") == ("proven", 1.8)
+    verdict, score, adjusted, reason = p.rank_for("macd_cross", "default", "AAA")
+    assert verdict == "proven" and score == 1.8
     assert p.rank_for("macd_cross", "slow", "AAA")[0] == "unproven"    # a preset must earn its own record
     assert p.rank_for("macd_cross", "default", "BBB")[0] == "unproven"
 
