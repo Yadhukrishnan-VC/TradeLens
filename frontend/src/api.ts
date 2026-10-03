@@ -9,10 +9,10 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-const TOKEN_KEY = "tradelite_api_token";
+const TOKEN_KEY = "tradelens_api_token";
 export const getToken = (): string => { try { return localStorage.getItem(TOKEN_KEY) ?? ""; } catch { return ""; } };
 export const setToken = (t: string) => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ } };
-export const AUTH_EVENT = "tradelite-auth-required";
+export const AUTH_EVENT = "tradelens-auth-required";
 
 export const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -23,7 +23,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     res = await fetch(path, {
       headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...init });
   } catch {
-    throw new ApiError(0, "Can't reach the tradelite server. Start it with: uvicorn tradelite.api.main:create_app --factory");
+    throw new ApiError(0, "Can't reach the tradelens server. Start it with: uvicorn tradelens.api.main:create_app --factory");
   }
   if (res.status === 401) {
     window.dispatchEvent(new Event(AUTH_EVENT));

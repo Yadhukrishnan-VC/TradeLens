@@ -21,11 +21,11 @@ function TokenGate() {
   return (
     <div className="app" style={{ display: "grid", placeItems: "center", minHeight: "100vh" }}>
       <form onSubmit={(e) => { e.preventDefault(); setToken(value.trim()); window.location.reload(); }} style={{ display: "grid", gap: 12, width: 360 }}>
-        <div className="brand">tradelite</div>
+        <div className="brand">tradelens</div>
         <label htmlFor="tok">API token</label>
         <input id="tok" type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} placeholder="the API_TOKEN from your .env" />
         <button type="submit" className="nav active" disabled={value.trim().length === 0}>Unlock</button>
-        <p style={{ fontSize: 13 }}>Kept in this browser only. Generate one with <code>python -m tradelite token</code>.</p>
+        <p style={{ fontSize: 13 }}>Kept in this browser only. Generate one with <code>python -m tradelens token</code>.</p>
       </form>
     </div>
   );
@@ -56,7 +56,7 @@ function Dashboard() {
   return (
     <div className="app">
       <aside className="rail">
-        <div className="brand">tradelite</div>
+        <div className="brand">tradelens</div>
         <nav aria-label="Main">
           {VIEWS.map((v) => (
             <button key={v} className={v === view ? "nav active" : "nav"} aria-current={v === view ? "page" : undefined} onClick={() => setView(v)}>{v}</button>

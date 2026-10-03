@@ -54,7 +54,7 @@ export function Data({ refreshKey, onChange }: { refreshKey: number; onChange: (
       <section className="block">
         <h2>Stored prices</h2>
         {coverage.error && <p className="error-text">{coverage.error}</p>}
-        {rows.length === 0 ? <p className="empty">No prices stored yet. Fetch some above, or load CSV files with: python -m tradelite import-csv</p> : (
+        {rows.length === 0 ? <p className="empty">No prices stored yet. Fetch some above, or load CSV files with: python -m tradelens import-csv</p> : (
           <div className="scroll"><table className="compact">
             <thead><tr><th>Symbol</th><th>From</th><th>To</th><th className="num">Bars</th></tr></thead>
             <tbody>{rows.map((r) => (
