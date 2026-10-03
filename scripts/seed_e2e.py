@@ -4,7 +4,7 @@ from datetime import datetime
 
 from tradelite.data.synthetic import make_bars
 from tradelite.db import make_engine, make_session_factory
-from tradelite.models import LiveMatchRow, OrderRow, SignalRow, StrategyFitRow
+from tradelite.models import LiveMatchRow, OrderRow, SignalRow, StrategyFitRow, WatchRow
 from tradelite.services.screener import ist_now
 
 url = sys.argv[1] if len(sys.argv) > 1 else "sqlite:///e2e.db"
@@ -18,10 +18,17 @@ with make_session_factory(make_engine(url))() as s:
     s.add(OrderRow(signal_id=sig.id, symbol="DEMO1", side="BUY", qty=10, status="PENDING_APPROVAL",
                    mode="semi_auto", tag="e2e-seed-0001", rank="proven", rank_score=1.8, created_at=datetime.now()))
     # a pair that "worked": shows up in the Track Record view (macd_cross on DEMO2 is not touched by the UI test)
+    # a signal the gate held back, with its flags (Signals page), and a setup close to triggering (Screener page)
+    s.add(SignalRow(strategy="macd_cross", symbol="DEMO3", side="BUY", ts=ts, entry=close, stop=close * 0.97, target=close * 1.06,
+                    status="gated", reason="NOT_VALIDATED", suggested_qty=0, rank="unproven", quality="warn",
+                    flags="OFF_REGIME,LOW_LIQUIDITY", regime="down/calm", gate="block", gate_reason="NOT_VALIDATED",
+                    created_at=datetime.now()))
+    s.add(WatchRow(strategy="donchian_breakout", config_name="default", symbol="DEMO2", bar_ts=ts, close=close, trigger=round(close * 1.012, 2),
+                   distance_pct=1.2, note="within 1.2% of the 20-day high; a close above it triggers", created_at=datetime.now()))
     now = ist_now()
     s.add(LiveMatchRow(strategy="donchian_breakout", config_name="default", symbol="DEMO3", trading_day=now.date(),
                        status="live", side="BUY", entry=250.0, stop=240.0, target=300.0, rr=5.0, rank="proven", rank_score=1.9,
-                       suggested_qty=12, fit="OK", first_seen=now, last_seen=now))
+                       suggested_qty=12, fit="OK", flags="EVENT:earnings,LOW_LIQUIDITY", first_seen=now, last_seen=now))
     s.add(LiveMatchRow(strategy="ema_cross", config_name="default", symbol="DEMO2", trading_day=now.date(),
                        status="faded", side="BUY", entry=100.0, stop=95.0, target=110.0, rr=2.0, rank="unproven", rank_score=0.0,
                        suggested_qty=0, fit="SIZE_ZERO_RISK_BUDGET", first_seen=now, last_seen=now))

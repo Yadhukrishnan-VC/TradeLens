@@ -16,7 +16,7 @@ from tradelite.db import make_session_factory, normalize_url
 from tradelite.domain import Mode
 from tradelite.models import OrderRow, SignalRow, StrategyFitRow
 from tradelite.risk.engine import RiskConfig, RiskEngine
-from tradelite.services import ingest, presets
+from tradelite.services import ingest, lifecycle, presets
 from tradelite.strategies import registry
 
 
@@ -121,6 +121,8 @@ def test_rank_matches_the_exact_config_only(pipeline_factory, session):
 
 def test_scan_runs_saved_presets_and_records_config(pipeline_factory, session):
     presets.save(session, "macd_cross", "quick", {"fast": 8, "slow": 21, "signal": 5})
+    _mark_proven(session, "macd_cross", "quick", "DEMO1")
+    lifecycle.record_evidence(session, "macd_cross", "quick")          # a passing test promotes the draft
     frames = {"DEMO1": make_bars("DEMO1")}
     strat = registry.get("macd_cross", fast=8, slow=21, signal=5)
     prep = strat.prepare(frames["DEMO1"])

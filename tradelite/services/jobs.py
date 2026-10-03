@@ -29,6 +29,7 @@ from ..models import JobRunRow, SignalRow
 from ..risk.engine import RiskEngine
 from . import ingest
 from .alerts import Alert, Notifier
+from .gate import GateConfig
 from .pipeline import Pipeline, ist_now
 from .schedule import due, expected_last_bar, load_holidays, parse_hhmm
 
@@ -42,8 +43,10 @@ class StaleDataError(RuntimeError):
 
 def build_pipeline(s: Session, settings: Settings, provider: DataProvider, broker: Broker, risk: RiskEngine,
                    notifier: Notifier | None, mode: Mode | None = None, require_fit: bool = False) -> Pipeline:
-    return Pipeline(s, provider, broker, risk=risk, mode=mode or Mode(settings.mode),
-                    starting_capital=settings.starting_capital, require_fit=require_fit, notifier=notifier)
+    mode = mode or Mode(settings.mode)
+    return Pipeline(s, provider, broker, risk=risk, mode=mode, starting_capital=settings.starting_capital,
+                    require_fit=require_fit, notifier=notifier, gate=GateConfig.from_settings(settings, mode),
+                    benchmark=settings.benchmark_symbol, stale_check=True)
 
 
 def stale_symbols(provider: DataProvider, symbols: list[str], expected: date) -> list[str]:
@@ -97,7 +100,10 @@ def run_daily(sf: sessionmaker[Session], settings: Settings, provider: DataProvi
 
         # 3) exits first: they free slots and cash for the scan
         with sf() as s:
-            closed = build_pipeline(s, settings, provider, broker, risk, notifier).check_exits()
+            pipe = build_pipeline(s, settings, provider, broker, risk, notifier)
+            closed = pipe.check_exits()
+            advice = pipe.review_positions()      # strategy opinions (EXIT / REDUCE) on what is still open; advice only
+            detail["advice"] = [{"symbol": a.symbol, "action": a.action, "reason": a.reason} for a in advice]
             detail["exits"] = [{"symbol": p.symbol, "reason": p.exit_reason, "pnl": round(p.pnl or 0.0, 2)} for p in closed]
             for p in closed:
                 notifier.send(Alert("warning" if p.exit_reason == "stop" else "info",
@@ -111,13 +117,16 @@ def run_daily(sf: sessionmaker[Session], settings: Settings, provider: DataProvi
             new = [(r.id, r.strategy, r.symbol, r.status, r.reason, r.suggested_qty, r.entry, r.stop, r.target, r.rank)
                    for r in rows]
             st = pipe.account_state()
+            watch = list(pipe.last_watch)
         proposed = [n for n in new if n[3] == "proposed"]
         executed = [n for n in new if n[3] == "executed"]
         rejected: dict[str, int] = {}
         for n in new:
             if n[3] == "rejected":
                 rejected[n[4] or "?"] = rejected.get(n[4] or "?", 0) + 1
-        detail["scan"] = {"new_signals": len(new), "proposed": len(proposed), "executed": len(executed), "rejected": rejected}
+        gated = [n for n in new if n[3] == "gated"]
+        detail["scan"] = {"new_signals": len(new), "proposed": len(proposed), "executed": len(executed), "rejected": rejected,
+                          "gated": len(gated), "watch": len(watch)}
         for _, strat, sym, _, _, qty, entry, stop, target, rank in proposed[:10]:
             notifier.send(Alert("info", f"Approve? BUY {qty} {sym} @ ~{entry:.2f}",
                                 f"{strat} ({rank}) stop {stop:.2f}" + (f", target {target:.2f}" if target else "")
@@ -136,8 +145,13 @@ def run_daily(sf: sessionmaker[Session], settings: Settings, provider: DataProvi
                              "open_positions": st.open_positions}
 
         summary = (f"{len(new)} new signal(s): {len(proposed)} awaiting approval, {len(executed)} executed, "
-                   f"{sum(rejected.values())} risk-rejected. {len(closed)} position(s) closed. "
+                   f"{len(gated)} held back by the gate, {sum(rejected.values())} rejected. {len(closed)} position(s) closed. "
                    f"Equity {st.equity:,.0f} (open P&L {st.unrealized_pnl:+,.0f}).")
+        if watch:
+            summary += "\nWatch tomorrow: " + "; ".join(
+                f"{w['symbol']} ({w['strategy']})" + (f" above {w['trigger']:.2f}" if w["trigger"] else "") for w in watch[:5])
+        if advice:
+            summary += "\nStrategy advice on open positions: " + "; ".join(f"{a.action} {a.symbol}" for a in advice[:5])
         if detail["warnings"]:
             summary += "\n" + "\n".join("- " + w for w in detail["warnings"])
         notifier.send(Alert("warning" if detail["warnings"] else "info", "Daily run complete", summary))

@@ -188,7 +188,7 @@ duplicate orders · stale signals are rejected at approval · kill switch blocks
 
 ## Known limits (be honest with yourself)
 Daily bars, long-biased strategies, single account, equity-style costs (verify the rates against
-Zerodha's calculator), single shared-token auth (no user accounts), no options/forex data yet, the database schema is created on start (no migrations yet: a schema change needs a fresh database or a manual migration).
+Zerodha's calculator), single shared-token auth (no user accounts), no options/forex data yet, new database columns are added automatically at start, but renames or removals still need a manual migration (no Alembic yet).
 
 Portfolio backtest limits: default strategy parameters only (saved presets are not used yet); the daily loss limit
 uses the previous trading day's realized P&L (daily bars); positions in symbols whose data ends are closed at the last

@@ -21,8 +21,9 @@ from ..domain import AccountState
 from ..models import LiveMatchRow, SignalRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
-from . import presets, ranking
-from .notify import NullNotifier, Notifier
+from . import context, events, lifecycle, presets, quality, ranking
+from .alerts import Alert, Notifier
+from .breaker import BreakerOpen, all_status, get_breaker
 
 IST = timezone(timedelta(hours=5, minutes=30))
 OPEN, CLOSE = time(9, 15), time(15, 30)
@@ -46,26 +47,36 @@ def with_live_bar(history: pd.DataFrame, bar: dict, today: date) -> pd.DataFrame
     return pd.concat([hist, row])
 
 
-def alert_text(m: LiveMatchRow) -> str:
+class _Silent:
+    def send(self, alert: Alert) -> bool:
+        return False
+
+
+def alert_for(m: LiveMatchRow) -> Alert:
     rr = f" (1:{m.rr:.1f})" if m.rr else ""
     tag = " PROVEN" if m.rank == "proven" else ""
     cfg = "" if m.config_name == "default" else f" [{m.config_name}]"
-    return (f"LIVE {m.strategy}{cfg}: {m.side} {m.symbol}{tag}\n"
-            f"entry ~{m.entry:.2f}  stop {m.stop:.2f}  target {m.target:.2f}{rr}\n"
-            "Provisional: today's bar is still forming. Confirm after the close.")
+    flags = f"\nWatch out: {m.flags.replace(',', ', ')}" if m.flags else ""
+    return Alert("info", f"LIVE {m.strategy}{cfg}: {m.side} {m.symbol}{tag}",
+                 f"entry ~{m.entry:.2f}  stop {m.stop:.2f}  target {m.target:.2f}{rr}{flags}\n"
+                 "Provisional: today's bar is still forming. Confirm after the close.")
 
 
 def run_cycle(sf: sessionmaker[Session], provider: DataProvider, source: LiveSource, risk: RiskEngine,
               state_fn: Callable[[Session], AccountState], *, now: datetime, notifier: Notifier | None = None,
-              symbols: list[str] | None = None) -> dict:
-    notifier = notifier or NullNotifier()
+              symbols: list[str] | None = None, benchmark: str = "", event_window: int = 2) -> dict:
+    notifier = notifier or _Silent()
     today = now.date()
     syms = symbols or provider.symbols()
     summary = {"symbols": len(syms), "priced": 0, "matches": 0, "new": 0, "faded": 0, "errors": []}
     if not syms:
         return summary
     try:
-        bars = source.snapshot(syms, today)
+        bars = get_breaker("yahoo-live").call(source.snapshot, syms, today)
+    except BreakerOpen as e:       # the service keeps failing: skip quietly until the cooldown ends
+        summary["errors"].append(str(e))
+        summary["paused"] = True
+        return summary
     except Exception as e:  # noqa: BLE001 - a flaky free source must never crash the loop
         summary["errors"].append(f"price source failed: {str(e)[:150]}")
         return summary
@@ -73,6 +84,8 @@ def run_cycle(sf: sessionmaker[Session], provider: DataProvider, source: LiveSou
     new_rows: list[LiveMatchRow] = []
     with sf() as s:
         preset_map = presets.for_strategies(s, sorted(catalog))
+        states = lifecycle.states_for(s)
+        regime = context.compute_regime(provider, benchmark, syms)
         state = state_fn(s)
         for sym in syms:
             bar = bars.get(sym)
@@ -84,9 +97,13 @@ def run_cycle(sf: sessionmaker[Session], provider: DataProvider, source: LiveSou
             except Exception as e:  # noqa: BLE001
                 summary["errors"].append(f"{sym}: {str(e)[:100]}")
                 continue
+            qual = quality.assess(df)
+            evs = events.upcoming(s, sym, today, event_window)
             hits: set[tuple[str, str]] = set()
             for name, cls in catalog.items():
                 for cfg_name, params in [(presets.DEFAULT, {})] + [(r.name, r.params) for r in preset_map[name]]:
+                    if not lifecycle.is_scanned(states, name, cfg_name):    # draft and retired are never screened
+                        continue
                     strat = cls(**params)
                     if "1d" not in strat.meta.timeframes or len(df) < strat.meta.min_bars + 2:
                         continue
@@ -108,6 +125,8 @@ def run_cycle(sf: sessionmaker[Session], provider: DataProvider, source: LiveSou
                     row.entry, row.stop, row.target, row.rr = sig.entry, sig.stop, sig.target, sig.rr
                     row.rank, row.rank_score = verdict, score
                     row.suggested_qty, row.fit = (decision.qty if decision.approved else 0), decision.reason
+                    off = bool(strat.meta.regimes) and regime.trend != "unknown" and regime.trend not in strat.meta.regimes
+                    row.flags = ",".join(list(qual.flags) + [f"EVENT:{e.kind}" for e in evs[:2]] + (["OFF_REGIME"] if off else []))[:120]
             for old in s.scalars(select(LiveMatchRow).where(
                     LiveMatchRow.symbol == sym, LiveMatchRow.trading_day == today, LiveMatchRow.status == "live")).all():
                 if (old.strategy, old.config_name) not in hits:   # condition no longer true on the forming bar
@@ -119,7 +138,7 @@ def run_cycle(sf: sessionmaker[Session], provider: DataProvider, source: LiveSou
         summary["new"] = len(new_rows)
         for m in sorted(new_rows, key=lambda r: (r.rank != "proven", -r.rank_score)):
             try:
-                notifier.send(alert_text(m))
+                notifier.send(alert_for(m))
             except Exception as e:  # noqa: BLE001
                 summary["errors"].append(f"alert failed: {str(e)[:100]}")
                 break
@@ -130,10 +149,11 @@ class LiveScreener:
     """Owns the polling loop and the last-run status. run_once() is also what the 'Check now' button calls."""
 
     def __init__(self, sf, provider, source: LiveSource | None, risk: RiskEngine, state_fn, *, interval: int = 300,
-                 notifier: Notifier | None = None, clock: Callable[[], datetime] = ist_now, enabled: bool = True) -> None:
+                 notifier: Notifier | None = None, clock: Callable[[], datetime] = ist_now, enabled: bool = True,
+                 benchmark: str = "", event_window_days: int = 2, telegram: bool = False) -> None:
         self.sf, self.provider, self.source, self.risk, self.state_fn = sf, provider, source, risk, state_fn
-        self.interval, self.notifier, self.clock, self.enabled = interval, notifier or NullNotifier(), clock, enabled
-        self.telegram = not isinstance(self.notifier, NullNotifier)
+        self.interval, self.notifier, self.clock, self.enabled = interval, notifier or _Silent(), clock, enabled
+        self.benchmark, self.event_window_days, self.telegram = benchmark, event_window_days, telegram
         self._lock, self._stop = threading.Lock(), threading.Event()
         self._thread: threading.Thread | None = None
         self.last: dict | None = None
@@ -149,7 +169,7 @@ class LiveScreener:
             return {"ran": False, "reason": "a check is already running"}
         try:
             self.last = run_cycle(self.sf, self.provider, self.source, self.risk, self.state_fn, now=now,
-                                  notifier=self.notifier)
+                                  notifier=self.notifier, benchmark=self.benchmark, event_window=self.event_window_days)
             self.last_run = now
             return {"ran": True, **self.last}
         finally:
@@ -160,7 +180,7 @@ class LiveScreener:
         return {"enabled": self.enabled and self.source is not None, "market_open": market_open(now),
                 "now_ist": now.isoformat(timespec="seconds"), "interval_seconds": self.interval,
                 "last_run": self.last_run.isoformat(timespec="seconds") if self.last_run else None,
-                "last_result": self.last, "telegram": self.telegram,
+                "last_result": self.last, "telegram": self.telegram, "breakers": all_status(),
                 "source": getattr(self.source, "name", None)}
 
     def start(self) -> None:
