@@ -10,7 +10,6 @@ from ..data.base import validate_bars
 from ..data.csv_provider import CsvProvider
 from ..data.sources import HistorySource
 from ..models import PriceBarRow
-from .breaker import get_breaker
 
 
 def store_bars(session: Session, symbol: str, df: pd.DataFrame, source: str) -> int:
@@ -33,24 +32,12 @@ def fetch_symbols(sf: sessionmaker[Session], source: HistorySource, symbols: lis
     end = (today or date.today()) + timedelta(days=1)
     start = end - timedelta(days=int(365.25 * years))
     out: list[dict] = []
-    breaker = get_breaker(f"{source.name}-history")
     for raw in symbols:
         sym = raw.strip().upper()
         if not sym:
             continue
-        if not breaker.allow():     # the service keeps failing: stop hammering it, say so per symbol
-            out.append({"symbol": sym, "ok": False, "error": f"skipped: price source paused ({breaker.last_error or 'repeated failures'}), retry in {int(breaker.retry_in()) + 1}s"})
-            continue
         try:
-            try:
-                df = source.fetch(sym, start, end)
-            except ValueError:
-                breaker.record_success()    # "no data for this symbol" is an answer from a healthy service
-                raise
-            except Exception as e:
-                breaker.record_failure(type(e).__name__)   # network / rate limit: the service itself is in trouble
-                raise
-            breaker.record_success()
+            df = source.fetch(sym, start, end)
             with sf() as s:
                 n = store_bars(s, sym, df, source.name)
             out.append({"symbol": sym, "ok": True, "bars": n,

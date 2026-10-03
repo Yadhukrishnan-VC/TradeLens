@@ -5,7 +5,7 @@ import pandas as pd
 
 from ..domain import Side, Signal
 from ..indicators import atr, ema
-from .base import ExitHint, Strategy, StrategyMeta, WatchNote, watch_note
+from .base import Strategy, StrategyMeta
 
 
 class EmaCross(Strategy):
@@ -14,7 +14,7 @@ class EmaCross(Strategy):
         description="Fast/slow EMA cross-up in an uptrend; ATR stop, fixed R-multiple target.",
         markets=("equity", "futures", "forex"),
         timeframes=("1d",),
-        min_bars=210, regimes=("up",),
+        min_bars=210,
     )
     default_params = {
         "fast": 20, "slow": 50, "trend": 200,
@@ -50,22 +50,3 @@ class EmaCross(Strategy):
             self.meta.name, symbol, Side.BUY, df.index[i].to_pydatetime(),
             entry=close, stop=close - risk, target=close + p["rr"] * risk,
         )
-
-    def watch(self, df, i, symbol):
-        p, row = self.params, df.iloc[i]
-        if pd.isna(row["ema_trend"]) or i < 1 or row["close"] <= row["ema_trend"]:
-            return None
-        ef, es, ef0, es0 = row["ema_fast"], row["ema_slow"], df["ema_fast"].iloc[i - 1], df["ema_slow"].iloc[i - 1]
-        if ef >= es or (ef - es) <= (ef0 - es0):          # already crossed, or not converging
-            return None
-        a_f, a_s = 2 / (p["fast"] + 1), 2 / (p["slow"] + 1)
-        need = ((1 - a_s) * es - (1 - a_f) * ef) / (a_f - a_s)   # next close at which fast EMA > slow EMA
-        if need <= 0 or need / row["close"] - 1 > 0.03:
-            return None
-        return watch_note(f"fast EMA ({p['fast']}) is below slow EMA ({p['slow']}) and closing in; a close above this level completes the cross-up", need, row["close"])
-
-    def exit_hint(self, df, i, entry_price):
-        row = df.iloc[i]
-        if row["ema_fast"] < row["ema_slow"]:
-            return ExitHint("EXIT", "fast EMA has fallen below slow EMA: the trend that triggered the entry has turned")
-        return None

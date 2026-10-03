@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
 from ..models import AlertRow
-from .breaker import CircuitBreaker, get_breaker
 
 log = logging.getLogger("tradelite.alerts")
 LEVELS = ("info", "warning", "critical")
@@ -57,37 +56,23 @@ class LogNotifier:
 
 
 class _HttpPoster:
-    channel = "http"
-
-    def __init__(self, opener: Callable = urllib.request.urlopen, timeout: float = 10.0,
-                 breaker: CircuitBreaker | None = None) -> None:
+    def __init__(self, opener: Callable = urllib.request.urlopen, timeout: float = 10.0) -> None:
         self._open, self.timeout = opener, timeout
-        # After repeated failures the channel is skipped for a while instead of blocking every alert for `timeout` s
-        self.breaker = breaker or get_breaker(self.channel)
 
     def _post(self, url: str, payload: dict) -> bool:
-        if not self.breaker.allow():
-            log.warning("alert channel %s is paused after repeated failures", self.channel)
-            return False
         req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
                                      headers={"content-type": "application/json"})
         try:
             with self._open(req, timeout=self.timeout) as resp:
-                ok = 200 <= getattr(resp, "status", 200) < 300
-            self.breaker.record_success() if ok else self.breaker.record_failure("bad status")
-            return ok
+                return 200 <= getattr(resp, "status", 200) < 300
         except urllib.error.HTTPError as e:
             log.error("alert delivery failed: HTTP %s", e.code)
-            self.breaker.record_failure(f"HTTP {e.code}")
         except Exception as e:  # noqa: BLE001 - never leak the URL (it holds the bot token)
             log.error("alert delivery failed: %s", type(e).__name__)
-            self.breaker.record_failure(type(e).__name__)
         return False
 
 
 class TelegramNotifier(_HttpPoster):
-    channel = "telegram"
-
     def __init__(self, bot_token: str, chat_id: str, **kw) -> None:
         super().__init__(**kw)
         if not bot_token or not chat_id:
@@ -99,8 +84,6 @@ class TelegramNotifier(_HttpPoster):
 
 
 class WebhookNotifier(_HttpPoster):
-    channel = "webhook"
-
     def __init__(self, url: str, **kw) -> None:
         super().__init__(**kw)
         self._url = safe_http_url(url)

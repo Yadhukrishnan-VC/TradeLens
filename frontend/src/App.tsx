@@ -4,16 +4,14 @@ import { KillSwitch } from "./components/KillSwitch";
 import { Notice, type NoticeState } from "./components/Notice";
 import { RiskStrip } from "./components/RiskStrip";
 import { Backtests } from "./views/Backtests";
-import { ContextBar } from "./components/ContextBar";
 import { Data } from "./views/Data";
 import { TrackRecord } from "./views/TrackRecord";
 import { Desk } from "./views/Desk";
 import { Positions } from "./views/Positions";
 import { Screener } from "./views/Screener";
 import { Signals } from "./views/Signals";
-import { Strategies } from "./views/Strategies";
 
-const VIEWS = ["Desk", "Screener", "Backtests", "Track Record", "Strategies", "Signals", "Positions", "Data"] as const;
+const VIEWS = ["Desk", "Screener", "Backtests", "Track Record", "Signals", "Positions", "Data"] as const;
 type View = (typeof VIEWS)[number];
 
 function TokenGate() {
@@ -78,13 +76,11 @@ function Dashboard() {
         )}
         <Notice notice={banner} onClose={() => setBanner(null)} />
         <RiskStrip account={account.data} cfg={cfg.data} />
-        <ContextBar refreshKey={refreshKey} />
         <h1 className="page-title">{view}</h1>
         {view === "Desk" && <Desk refreshKey={refreshKey} onChange={bump} />}
         {view === "Backtests" && <Backtests refreshKey={refreshKey} onChange={bump} />}
         {view === "Screener" && <Screener refreshKey={refreshKey} />}
         {view === "Track Record" && <TrackRecord refreshKey={refreshKey} onChange={bump} />}
-        {view === "Strategies" && <Strategies refreshKey={refreshKey} onChange={bump} />}
         {view === "Signals" && <Signals refreshKey={refreshKey} onChange={bump} serverMode={health.data?.mode ?? "semi_auto"} />}
         {view === "Positions" && <Positions refreshKey={refreshKey} onChange={bump} />}
         {view === "Data" && <Data refreshKey={refreshKey} onChange={bump} />}

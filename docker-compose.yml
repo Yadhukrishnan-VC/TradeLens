@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: tradelite
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradelite}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: tradelite
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -30,24 +30,21 @@ services:
       STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
       BROKER: paper
       LIVE_SCREENER: ${LIVE_SCREENER:-1}
-      GATE_MODE: ${GATE_MODE:-auto}
-      BENCHMARK_SYMBOL: ${BENCHMARK_SYMBOL:-NIFTYBEES}
-      ENFORCE_REGIME: ${ENFORCE_REGIME:-0}
-      EVENT_WINDOW_DAYS: ${EVENT_WINDOW_DAYS:-2}
-      VALIDATION_MAX_AGE_DAYS: ${VALIDATION_MAX_AGE_DAYS:-45}
       LIVE_INTERVAL_SECONDS: ${LIVE_INTERVAL_SECONDS:-300}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelite token)}
     volumes:
       - ./data:/app/data:ro          # optional: SYMBOL.csv files for `import-csv`
     # Token auth protects the API, but keep it bound to this machine; put HTTPS in front before exposing it.
     ports:
       - "127.0.0.1:8000:8000"
+    command: ["python", "-m", "tradelite", "migrate"]
 
   # Runs the daily job after market close on trading days. Same image, same database, no published port.
   worker:
     build: .
-    command: ["python", "-m", "tradelite", "worker"]
+    command: ["python", "-m", "tradelite", "migrate", "&&", "python", "-m", "tradelite", "worker"]
     restart: unless-stopped
     depends_on:
       db:
@@ -62,16 +59,12 @@ services:
       BROKER: paper
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelite token)}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       HEALTHCHECK_PING_URL: ${HEALTHCHECK_PING_URL:-}
       DAILY_RUN_AT: ${DAILY_RUN_AT:-16:30}
       HOLIDAYS_FILE: ${HOLIDAYS_FILE:-}
       REFRESH_YEARS: ${REFRESH_YEARS:-5}
-      GATE_MODE: ${GATE_MODE:-auto}
-      BENCHMARK_SYMBOL: ${BENCHMARK_SYMBOL:-NIFTYBEES}
-      ENFORCE_REGIME: ${ENFORCE_REGIME:-0}
-      EVENT_WINDOW_DAYS: ${EVENT_WINDOW_DAYS:-2}
-      VALIDATION_MAX_AGE_DAYS: ${VALIDATION_MAX_AGE_DAYS:-45}
     volumes:
       - ./data:/app/data:ro          # put holidays.txt here and set HOLIDAYS_FILE=/app/data/holidays.txt
 

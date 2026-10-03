@@ -16,7 +16,7 @@ from tradelite.db import make_session_factory, normalize_url
 from tradelite.domain import Mode
 from tradelite.models import OrderRow, SignalRow, StrategyFitRow
 from tradelite.risk.engine import RiskConfig, RiskEngine
-from tradelite.services import ingest, lifecycle, presets
+from tradelite.services import ingest, presets
 from tradelite.strategies import registry
 
 
@@ -113,15 +113,14 @@ def test_proven_signal_wins_the_last_position_slot(pipeline_factory, session):
 def test_rank_matches_the_exact_config_only(pipeline_factory, session):
     _mark_proven(session, "macd_cross", "default", "AAA")
     p = pipeline_factory(Mode.SIGNAL_ONLY)
-    assert p.rank_for("macd_cross", "default", "AAA") == ("proven", 1.8)
+    verdict, score, adjusted, reason = p.rank_for("macd_cross", "default", "AAA")
+    assert verdict == "proven" and score == 1.8
     assert p.rank_for("macd_cross", "slow", "AAA")[0] == "unproven"    # a preset must earn its own record
     assert p.rank_for("macd_cross", "default", "BBB")[0] == "unproven"
 
 
 def test_scan_runs_saved_presets_and_records_config(pipeline_factory, session):
     presets.save(session, "macd_cross", "quick", {"fast": 8, "slow": 21, "signal": 5})
-    _mark_proven(session, "macd_cross", "quick", "DEMO1")
-    lifecycle.record_evidence(session, "macd_cross", "quick")          # a passing test promotes the draft
     frames = {"DEMO1": make_bars("DEMO1")}
     strat = registry.get("macd_cross", fast=8, slow=21, signal=5)
     prep = strat.prepare(frames["DEMO1"])

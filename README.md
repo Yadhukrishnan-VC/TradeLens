@@ -9,7 +9,7 @@ cp .env.example .env            # set POSTGRES_PASSWORD
 docker compose up --build       # starts PostgreSQL + the app
 ```
 Open **http://localhost:8000/**. The database lives in the `pgdata` volume, so it survives restarts.
-The app is bound to `127.0.0.1` only because the API has no login yet; do not expose it publicly.
+The app is bound to `127.0.0.1` only because the API requires a bearer token (`API_TOKEN`); do not expose it publicly without a reverse proxy.
 
 Then, in the dashboard, open **Data** and click *Fetch prices* (or use the command line):
 ```bash
@@ -82,45 +82,6 @@ It is an unofficial API and can rate-limit or change; failures are reported per 
 Prices are validated before they are stored (OHLC consistency, no NaN, no duplicates). Set `DATA_SOURCE=csv` to read
 `SYMBOL.csv` files (`date,open,high,low,close,volume`) directly from `DATA_DIR` instead of the database.
 
-## Decision support: gate, lifecycle, context, data quality, events
-A signal is always recorded and shown. These pieces decide what happens next and tell a human what to doubt.
-
-**The gate** (`GATE_MODE`, default `auto`). May this signal become an order? Reasons, in plain words on the Signals page:
-not switched on (lifecycle), not validated on this stock, validation too old (`VALIDATION_MAX_AGE_DAYS`), results or an event
-within `EVENT_WINDOW_DAYS`, and optionally the market regime is wrong (`ENFORCE_REGIME=1`). `enforce` holds the signal back
-(status "Held back", no order); `advisory` creates the order and shows the warning; `auto` enforces only in `auto` trading mode,
-where nobody approves. The gate runs only on the live path: backtests and portfolio backtests never call it, because a gate that
-blocked backtests could never collect the evidence it asks for (a test pins this).
-
-**Strategy lifecycle** (Strategies page). `draft` (a new or edited setting: backtest only) -> `validated` (a backtest passed the
-stability check on at least one stock; set automatically; scanned and screened) -> `active` (you switched it on; only active
-strategies may create orders) -> `retired` (never scanned). Evidence moves a setting forward, only a human makes it active. The
-built-in strategies, and presets saved before this existed, start active.
-
-**Market context** (bar on every page, `GET /context`). Trend (benchmark against its 200- and 50-day averages), volatility
-(20-day realised volatility against the past year) and breadth (share of stored stocks above their 50-day average), from plain rules
-and prices up to the decision bar only. Needs the benchmark stored: `python -m tradelite fetch --symbols NIFTYBEES`. Each strategy
-declares the trends it is made for; a signal outside them is flagged `OFF_REGIME`. Every signal stores the regime it fired in.
-
-**Data quality on every signal.** Stale prices (behind the rest of the universe), a one-day move over 35%, gaps in the data,
-zero-volume days, thin trading. Level `bad` (stale, or a recent jump) means no order is ever opened from that signal, whatever the
-gate says; `warn` is shown next to the signal.
-
-**Event calendar** (Data page, `import-events`, `fetch-events`). Dated events that make a new trade riskier. CSV `symbol,date,kind[,note]`
-(`*` = whole market). `fetch-events` pulls earnings dates from Yahoo, best effort: Yahoo's NSE calendar is patchy, so an empty calendar
-is not proof of no events.
-
-**Watchlist and strategy advice.** After each scan, setups one step from triggering are saved with the price that would complete them
-(Screener page; the trigger levels are verified to fire the strategy exactly). For positions you hold, each strategy says EXIT or
-REDUCE when the idea behind the entry stops working. This is advice only: stops and targets still close positions by themselves and
-nothing is ever sold from an advice. Both are included in the daily summary alert.
-
-**Circuit breaker** for Yahoo (history and live), Telegram and webhooks: three failures in a row pause the service for five minutes,
-then one probe decides. "No data for this symbol" is a normal answer and never trips it. State is shown on the Screener page.
-
-**Upgrading an existing database.** Missing columns are added automatically at start (`ADD COLUMN` only, nothing dropped or rewritten).
-Renames or removals still need a manual migration.
-
 ## Modes (`TRADELITE_MODE`)
 `signal_only` records signals · `semi_auto` creates orders that wait for your approval · `auto` sends
 risk-approved orders to the broker. Stops/targets are always automatic via `POST /exits/check`.
@@ -188,7 +149,7 @@ duplicate orders · stale signals are rejected at approval · kill switch blocks
 
 ## Known limits (be honest with yourself)
 Daily bars, long-biased strategies, single account, equity-style costs (verify the rates against
-Zerodha's calculator), single shared-token auth (no user accounts), no options/forex data yet, new database columns are added automatically at start, but renames or removals still need a manual migration (no Alembic yet).
+Zerodha's calculator), single shared-token auth (no user accounts), no options/forex data yet, the database schema is created on start (no migrations yet: a schema change needs a fresh database or a manual migration).
 
 Portfolio backtest limits: default strategy parameters only (saved presets are not used yet); the daily loss limit
 uses the previous trading day's realized P&L (daily bars); positions in symbols whose data ends are closed at the last

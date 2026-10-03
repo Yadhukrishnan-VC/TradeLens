@@ -60,12 +60,3 @@ def pipeline_factory(session):
 
 def buy_signal(entry=100.0, stop=95.0, target=110.0, symbol="X") -> Signal:
     return Signal("test", symbol, Side.BUY, pd.Timestamp("2020-01-01").to_pydatetime(), entry, stop, target)
-
-
-@pytest.fixture(autouse=True)
-def _fresh_breakers():
-    """Circuit breakers are shared per outside service; every test starts with them closed."""
-    from tradelite.services import breaker
-    breaker.reset_all()
-    yield
-    breaker.reset_all()

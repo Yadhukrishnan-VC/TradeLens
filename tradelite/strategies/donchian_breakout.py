@@ -5,7 +5,7 @@ import pandas as pd
 
 from ..domain import Side, Signal
 from ..indicators import atr, ema
-from .base import ExitHint, Strategy, StrategyMeta, WatchNote, watch_note
+from .base import Strategy, StrategyMeta
 
 
 class DonchianBreakout(Strategy):
@@ -14,7 +14,7 @@ class DonchianBreakout(Strategy):
         description="First close above prior N-bar high with volume confirmation; ATR stop, R-multiple target.",
         markets=("equity", "futures", "forex"),
         timeframes=("1d",),
-        min_bars=120, regimes=("up",),
+        min_bars=120,
     )
     default_params = {
         "lookback": 20, "trend": 100, "vol_mult": 1.2,
@@ -50,21 +50,3 @@ class DonchianBreakout(Strategy):
             self.meta.name, symbol, Side.BUY, df.index[i].to_pydatetime(),
             entry=close, stop=close - risk, target=close + p["rr"] * risk,
         )
-
-    def watch(self, df, i, symbol):
-        p, row = self.params, df.iloc[i]
-        if pd.isna(row["ema_trend"]) or pd.isna(row["prior_high"]) or row["close"] <= row["ema_trend"] or row["close"] > row["prior_high"]:
-            return None
-        trigger = float(df["high"].iloc[max(0, i - p["lookback"] + 1): i + 1].max())   # the N-bar high the next bar must beat
-        gap = trigger / row["close"] - 1
-        if not 0 < gap <= 0.015:
-            return None
-        return watch_note(f"within {gap * 100:.1f}% of the {p['lookback']}-day high; a close above it with {p['vol_mult']}x average volume triggers", trigger, row["close"])
-
-    def exit_hint(self, df, i, entry_price):
-        if i < 11:
-            return None
-        low10 = float(df["low"].iloc[i - 10:i].min())
-        if df["close"].iloc[i] < low10:
-            return ExitHint("EXIT", f"closed below the 10-day low ({low10:.2f}): the breakout has failed")
-        return None

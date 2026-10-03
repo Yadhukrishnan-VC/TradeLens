@@ -21,27 +21,6 @@ class StrategyMeta:
     markets: tuple[str, ...] = ("equity",)
     timeframes: tuple[str, ...] = ("1d",)
     min_bars: int = 50   # warm-up bars before the first signal is allowed
-    regimes: tuple[str, ...] = ()   # market trends it is made for (up / sideways / down); empty = any
-
-
-@dataclass(frozen=True)
-class WatchNote:
-    """A setup that is close to triggering. `trigger` is the price that would complete it (None when the setup is
-    not a single price level); distance_pct is trigger vs the last close, signed."""
-    note: str
-    trigger: float | None = None
-    distance_pct: float | None = None
-
-
-@dataclass(frozen=True)
-class ExitHint:
-    """What the strategy itself thinks about an open position. EXIT or REDUCE. Advice only."""
-    action: str          # EXIT | REDUCE
-    reason: str
-
-
-def watch_note(note: str, trigger: float, close: float) -> WatchNote:
-    return WatchNote(note, round(trigger, 2), round(100.0 * (trigger / close - 1.0), 2))
 
 
 class Strategy(ABC):
@@ -59,15 +38,6 @@ class Strategy(ABC):
 
     @abstractmethod
     def on_bar(self, df: pd.DataFrame, i: int, symbol: str) -> Signal | None: ...
-
-    def watch(self, df: pd.DataFrame, i: int, symbol: str) -> WatchNote | None:
-        """Called on a PREPARED frame when on_bar() found nothing: is a signal one step away? Default: no."""
-        return None
-
-    def exit_hint(self, df: pd.DataFrame, i: int, entry_price: float) -> ExitHint | None:
-        """Called on a PREPARED frame for an open long position: has the idea behind the entry stopped
-        working? Default: no opinion (the stop and target still apply)."""
-        return None
 
 
 def long_signal(name: str, symbol: str, df: pd.DataFrame, i: int, atr_value: float,

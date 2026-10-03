@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errText, useLoad } from "../api";
 import { Badge } from "../components/Badge";
-import { Flags } from "../components/Flags";
 import { Notice, type NoticeState } from "../components/Notice";
 import { inr, reasonText } from "../format";
-import type { WatchItem } from "../types";
 import type { LiveMatch } from "../types";
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
@@ -81,17 +79,10 @@ export function Screener({ refreshKey }: { refreshKey: number }) {
           {canNotify() && <button className="btn ghost" onClick={enableAlerts} disabled={alerts}>{alerts ? "Browser alerts on" : "Turn on browser alerts"}</button>}
         </div>
         <Notice notice={notice} onClose={() => setNotice(null)} />
-        {(status?.breakers ?? []).filter((b) => b.state !== "closed").map((b) => (
-          <p key={b.name} className="error-text">
-            {b.name} is paused after repeated failures{b.last_error ? ` (${b.last_error})` : ""}. It will be tried again in about {Math.max(1, Math.ceil(b.retry_in_seconds / 60))} min.
-          </p>
-        ))}
         {r?.errors?.length ? <p className="error-text">{r.errors[0]}</p> : null}
         {data.error && <p className="error-text">{data.error}</p>}
         <p className="muted">{total} live match{total === 1 ? "" : "es"} right now across {strategies.length} strategies.</p>
       </section>
-
-      <Watchlist refreshKey={refreshKey} />
 
       {strategies.map((s) => (
         <section className="block" key={s.name}>
@@ -102,7 +93,7 @@ export function Screener({ refreshKey }: { refreshKey: number }) {
               <thead><tr>
                 <th>Stock</th><th>Settings</th><th>State</th><th>Track record</th><th className="num">Entry (buy near)</th>
                 <th className="num">Stop loss (exit)</th><th className="num">Target (exit)</th><th className="num">Reward : risk</th>
-                <th className="num">Risk / share</th><th className="num">Qty for your capital</th><th>Flags</th><th>First seen</th>
+                <th className="num">Risk / share</th><th className="num">Qty for your capital</th><th>First seen</th>
               </tr></thead>
               <tbody>{s.matches.map((m) => (
                 <tr key={m.id}>
@@ -111,36 +102,12 @@ export function Screener({ refreshKey }: { refreshKey: number }) {
                   <td className="num">{inr(m.entry, 2)}</td><td className="num loss">{inr(m.stop, 2)}</td><td className="num gain">{inr(m.target, 2)}</td>
                   <td className="num">{m.rr ? `1 : ${m.rr.toFixed(1)}` : "–"}</td><td className="num">{inr(m.risk_per_share, 2)}</td>
                   <td className="num">{m.suggested_qty > 0 ? m.suggested_qty : <span className="muted">{reasonText(m.fit)}</span>}</td>
-                  <td><Flags flags={m.flags} /></td><td>{clock(m.first_seen)}</td>
+                  <td>{clock(m.first_seen)}</td>
                 </tr>))}</tbody>
             </table></div>
           )}
         </section>
       ))}
     </>
-  );
-}
-
-function Watchlist({ refreshKey }: { refreshKey: number }) {
-  const wl = useLoad(api.watchlist, [refreshKey], 60000);
-  const items: WatchItem[] = wl.data?.items ?? [];
-  return (
-    <section className="block">
-      <h2>Watchlist: close to triggering <span className="muted">({items.length})</span></h2>
-      <p className="lede">Setups one step away from a signal, from the latest daily scan{wl.data?.as_of ? ` (bar of ${wl.data.as_of})` : ""}. Where there is a trigger
-        level, a close beyond it on the next bar completes the setup. These are not signals yet and may never become one.</p>
-      {wl.error && <p className="error-text">{wl.error}</p>}
-      {items.length === 0 ? <p className="empty">Nothing is close to triggering. Run a scan on the Signals page.</p> : (
-        <div className="scroll"><table className="compact">
-          <thead><tr><th>Stock</th><th>Strategy</th><th>Track record</th><th className="num">Last close</th><th className="num">Trigger level</th><th className="num">Away</th><th>What to watch</th></tr></thead>
-          <tbody>{items.map((w) => (
-            <tr key={w.id}>
-              <td><strong>{w.symbol}</strong></td><td>{w.strategy}{w.config_name !== "default" && <span className="muted"> · {w.config_name}</span>}</td>
-              <td><Badge kind={w.rank} /></td><td className="num">{inr(w.close, 2)}</td><td className="num">{inr(w.trigger, 2)}</td>
-              <td className="num">{w.distance_pct == null ? "–" : `${w.distance_pct > 0 ? "+" : ""}${w.distance_pct.toFixed(1)}%`}</td><td className="muted">{w.note}</td>
-            </tr>))}</tbody>
-        </table></div>
-      )}
-    </section>
   );
 }

@@ -5,14 +5,14 @@ import pandas as pd
 
 from ..domain import Signal
 from ..indicators import atr, ema
-from .base import ExitHint, Strategy, StrategyMeta, WatchNote, long_signal
+from .base import Strategy, StrategyMeta, long_signal
 
 
 class MacdCross(Strategy):
     meta = StrategyMeta(
         name="macd_cross",
         description="MACD crosses above its signal line in an uptrend; ATR stop, R-multiple target.",
-        markets=("equity", "futures", "forex"), timeframes=("1d",), min_bars=120, regimes=("up",),
+        markets=("equity", "futures", "forex"), timeframes=("1d",), min_bars=120,
     )
     default_params = {"fast": 12, "slow": 26, "signal": 9, "trend": 100,
                       "atr_n": 14, "atr_mult": 2.0, "rr": 2.0, "min_avg_volume": 0.0}
@@ -36,20 +36,3 @@ class MacdCross(Strategy):
         if row["close"] <= row["ema_trend"] or row["vol_ma"] < self.params["min_avg_volume"]:
             return None
         return long_signal(self.meta.name, symbol, df, i, row["atr"], self.params["atr_mult"], self.params["rr"])
-
-    def watch(self, df, i, symbol):
-        row = df.iloc[i]
-        if i < 1 or pd.isna(row["atr"]) or pd.isna(row["ema_trend"]) or row["close"] <= row["ema_trend"]:
-            return None
-        hist, hist0 = row["macd"] - row["macd_sig"], df["macd"].iloc[i - 1] - df["macd_sig"].iloc[i - 1]
-        if hist >= 0 or hist <= hist0 or abs(hist) > 0.15 * row["atr"]:
-            return None
-        return WatchNote("MACD is just below its signal line and rising; a cross-up may come within a bar or two")
-
-    def exit_hint(self, df, i, entry_price):
-        row = df.iloc[i]
-        if row["macd"] < row["macd_sig"]:
-            if row["close"] < row["ema_trend"]:
-                return ExitHint("EXIT", "MACD is below its signal line and price lost the trend average")
-            return ExitHint("REDUCE", "MACD crossed below its signal line: momentum is fading")
-        return None

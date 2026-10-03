@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { api, errText, useLoad } from "../api";
 import { Badge } from "../components/Badge";
-import { PositionAdvice } from "../components/PositionAdvice";
 import { Notice, type NoticeState } from "../components/Notice";
 import { day, inr, reasonText } from "../format";
 import type { SignalRow } from "../types";
@@ -113,8 +112,6 @@ export function Desk({ refreshKey, onChange }: { refreshKey: number; onChange: (
           </table></div>
         )}
       </section>
-
-      <PositionAdvice refreshKey={refreshKey} onChange={onChange} />
 
       <section className="block">
         <h2>Latest signals</h2>

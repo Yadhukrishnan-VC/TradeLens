@@ -40,8 +40,7 @@ export interface Fit {
 }
 export interface SignalRow {
   id: number; strategy: string; config_name: string; symbol: string; side: string; ts: string; entry: number; stop: number;
-  target: number | null; status: string; reason: string | null; suggested_qty: number; rank: Rank; rank_score: number;
-  quality: string; flags: string; regime: string; gate: string; gate_reason: string; created_at: string;
+  target: number | null; status: string; reason: string | null; suggested_qty: number; rank: Rank; rank_score: number; created_at: string;
 }
 export interface OrderRow {
   id: number; signal_id: number; symbol: string; side: string; qty: number; price: number | null;
@@ -68,35 +67,15 @@ export interface FetchResult { symbol: string; ok: boolean; bars?: number; start
 export interface LiveMatch {
   id: number; strategy: string; config_name: string; symbol: string; status: "live" | "faded"; side: string;
   entry: number; stop: number; target: number | null; rr: number | null; risk_per_share: number;
-  rank: Rank; rank_score: number; suggested_qty: number; fit: string; flags: string; confirmed: boolean;
+  rank: Rank; rank_score: number; suggested_qty: number; fit: string; confirmed: boolean;
   first_seen: string; last_seen: string;
 }
 export interface ScreenerStrategy { name: string; description: string; matches: LiveMatch[] }
 export interface ScreenerStatus {
   enabled: boolean; market_open: boolean; now_ist: string; interval_seconds: number; last_run: string | null;
-  last_result: { symbols: number; priced: number; matches: number; new: number; faded: number; errors: string[]; paused?: boolean } | null;
-  telegram: boolean; source: string | null; breakers: Breaker[];
+  last_result: { symbols: number; priced: number; matches: number; new: number; faded: number; errors: string[] } | null;
+  telegram: boolean; source: string | null;
 }
 export interface ScreenerData { status: ScreenerStatus; strategies: ScreenerStrategy[] }
 export interface ScreenerRun { ran: boolean; reason?: string; priced?: number; new?: number; errors?: string[] }
 export interface BatchResult { config_name: string; ran: number; skipped: number; proven: number; problems: string[] }
-
-export interface Breaker { name: string; state: "closed" | "open" | "half_open"; failures: number; retry_in_seconds: number; last_error: string }
-export interface Regime { trend: string; vol: string; breadth_pct: number | null; label: string; note: string; as_of: string | null; benchmark: string }
-export interface ContextData {
-  as_of: string; regime: Regime;
-  portfolio: { equity: number; starting_capital: number; open_positions: number; slots_free: number; exposure_pct: number;
-    drawdown_pct: number; realized_today: number; daily_loss_used_pct: number; kill_switch: boolean };
-  gate: { mode: string; enforce_regime: boolean; event_window_days: number; validation_max_age_days: number };
-}
-export interface WatchItem {
-  id: number; strategy: string; config_name: string; symbol: string; bar_ts: string; close: number;
-  trigger: number | null; distance_pct: number | null; note: string; rank: Rank; rank_score: number;
-}
-export interface PositionAlert {
-  id: number; position_id: number; symbol: string; strategy: string; action: "EXIT" | "REDUCE"; reason: string;
-  price: number; bar_ts: string; created_at: string; acknowledged: boolean;
-}
-export type LifecycleState = "draft" | "validated" | "active" | "retired";
-export interface LifecycleRow { strategy: string; config_name: string; state: LifecycleState; note: string; tested: number; proven: number; regimes: string[] }
-export interface EventItem { id: number; symbol: string; day: string; kind: string; note: string; source: string }

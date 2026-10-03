@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from ..models import StrategyConfigRow
 from ..strategies import registry
-from . import lifecycle
 
 DEFAULT = "default"
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,63}$")
@@ -45,12 +44,9 @@ def save(session: Session, strategy: str, name: str, params: dict) -> StrategyCo
     if row is None:
         row = StrategyConfigRow(strategy=strategy, name=name)
         session.add(row)
-    changed = row.params != clean if row.id is not None else True
     row.params = clean
     row.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
     session.commit()
-    if changed:                                   # new or edited numbers = an untested strategy: start as a draft
-        lifecycle.start_as_draft(session, strategy, name)
     return row
 
 

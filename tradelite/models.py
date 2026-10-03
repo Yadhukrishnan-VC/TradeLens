@@ -35,11 +35,6 @@ class SignalRow(Base):
     suggested_qty: Mapped[int] = mapped_column(Integer, default=0)
     rank: Mapped[str] = mapped_column(String(10), default="unproven")   # proven|unproven
     rank_score: Mapped[float] = mapped_column(Float, default=0.0)       # profit factor of the matching proven fit
-    quality: Mapped[str] = mapped_column(String(8), default="ok", server_default="ok")      # ok | warn | bad (input data)
-    flags: Mapped[str] = mapped_column(String(120), default="", server_default="")          # data/event/regime flags, comma separated
-    regime: Mapped[str] = mapped_column(String(24), default="", server_default="")          # market regime when it fired, e.g. up/calm
-    gate: Mapped[str] = mapped_column(String(8), default="off", server_default="off")       # off | pass | warn | block
-    gate_reason: Mapped[str] = mapped_column(String(80), default="", server_default="")     # why the gate warned/blocked
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 
@@ -65,6 +60,7 @@ class PositionRow(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     symbol: Mapped[str] = mapped_column(String(32), index=True)
     strategy: Mapped[str] = mapped_column(String(64))
+    config_name: Mapped[str] = mapped_column(String(64), default="default")
     side: Mapped[str] = mapped_column(String(4))
     qty: Mapped[int] = mapped_column(Integer)
     entry_price: Mapped[float] = mapped_column(Float)
@@ -158,6 +154,20 @@ class JobRunRow(Base):
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class TrialsRow(Base):
+    """Every strategy-variant tried on a symbol, for multiple-testing correction."""
+    __tablename__ = "trials"
+    __table_args__ = (UniqueConstraint("strategy", "config_name", "symbol", "params_hash", "run_at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy: Mapped[str] = mapped_column(String(64), index=True)
+    config_name: Mapped[str] = mapped_column(String(64), default="default")
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    params_hash: Mapped[str] = mapped_column(String(64), index=True)
+    run_at: Mapped[datetime] = mapped_column(DateTime)
+    n_trades: Mapped[int] = mapped_column(Integer)
+    expectancy: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
 class StrategyConfigRow(Base):
     """A user-customised parameter set for a strategy ("preset"). The built-in defaults are the
     implicit config named 'default'; presets are tested, ranked and scanned separately."""
@@ -203,65 +213,34 @@ class LiveMatchRow(Base):
     rank_score: Mapped[float] = mapped_column(Float, default=0.0)
     suggested_qty: Mapped[int] = mapped_column(Integer, default=0)
     fit: Mapped[str] = mapped_column(String(32), default="OK")          # risk-engine verdict for YOUR capital
-    flags: Mapped[str] = mapped_column(String(120), default="", server_default="")   # event / regime flags
     first_seen: Mapped[datetime] = mapped_column(DateTime)
     last_seen: Mapped[datetime] = mapped_column(DateTime)
 
 
-class StrategyLifecycleRow(Base):
-    """Where a strategy (or a saved preset) stands: draft -> validated -> active -> retired.
-    No row means 'active' (built-ins and presets saved before lifecycle existed)."""
-    __tablename__ = "strategy_lifecycle"
-    __table_args__ = (UniqueConstraint("strategy", "config_name"),)
+class DataQualityRow(Base):
+    """Per-symbol data quality flags: gaps, stale moves, zero volume, staleness."""
+    __tablename__ = "data_quality"
+    __table_args__ = (UniqueConstraint("symbol", "date"),)
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True, index=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    has_gap_5_days: Mapped[bool] = mapped_column(default=False)
+    # one-day move beyond 35% with no split flagged
+    large_one_day_move: Mapped[bool] = mapped_column(default=False)
+    zero_volume_days: Mapped[int] = mapped_column(default=0)
+    staleness_days: Mapped[int] = mapped_column(default=0)
+    adjusted: Mapped[bool] = mapped_column(default=True)  # True = adjusted prices, False = raw
+
+class PaperReconciliationRow(Base):
+    """Reconciliation record: order fill vs model expectation."""
+    __tablename__ = "paper_reconciliation"
+    __table_args__ = (UniqueConstraint("order_id", "model_price", "fill_price"),)
     id: Mapped[int] = mapped_column(primary_key=True)
-    strategy: Mapped[str] = mapped_column(String(64), index=True)
-    config_name: Mapped[str] = mapped_column(String(64), default="default")
-    state: Mapped[str] = mapped_column(String(10), default="draft")
-    note: Mapped[str] = mapped_column(String(200), default="")
-    updated_at: Mapped[datetime] = mapped_column(DateTime)
-
-
-class EventRow(Base):
-    """A dated event that makes a trade riskier (earnings, board meeting, policy day).
-    symbol '*' applies to the whole market."""
-    __tablename__ = "events"
-    __table_args__ = (UniqueConstraint("symbol", "day", "kind"),)
-    id: Mapped[int] = mapped_column(primary_key=True)
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    day: Mapped[date] = mapped_column(Date, index=True)
-    kind: Mapped[str] = mapped_column(String(32), default="event")
-    note: Mapped[str] = mapped_column(String(200), default="")
-    source: Mapped[str] = mapped_column(String(16), default="manual")   # manual | csv | yahoo
-
-
-class WatchRow(Base):
-    """A setup that is close to triggering a strategy (the WATCH idea): look at it tomorrow."""
-    __tablename__ = "watchlist"
-    __table_args__ = (UniqueConstraint("strategy", "config_name", "symbol", "bar_ts"),)
-    id: Mapped[int] = mapped_column(primary_key=True)
-    strategy: Mapped[str] = mapped_column(String(64), index=True)
-    config_name: Mapped[str] = mapped_column(String(64), default="default")
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    bar_ts: Mapped[datetime] = mapped_column(DateTime, index=True)     # the bar this was seen on
-    close: Mapped[float] = mapped_column(Float)
-    trigger: Mapped[float | None] = mapped_column(Float, nullable=True)
-    distance_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    note: Mapped[str] = mapped_column(String(200), default="")
+    order_id: Mapped[int] = mapped_column(Integer, index=True)
+    model_price: Mapped[float] = mapped_column(Float)  # expected R or price
+    fill_price: Mapped[float] = mapped_column(Float)  # actual fill price
+    realised_slippage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_r_multiple: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_r_ci_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_r_ci_high: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime)
-
-
-class PositionAlertRow(Base):
-    """A strategy's own opinion about an OPEN position: EXIT or REDUCE. Advice only: stops and
-    targets still close positions; nothing here ever sends an order."""
-    __tablename__ = "position_alerts"
-    __table_args__ = (UniqueConstraint("position_id", "bar_ts", "action"),)
-    id: Mapped[int] = mapped_column(primary_key=True)
-    position_id: Mapped[int] = mapped_column(ForeignKey("positions.id"), index=True)
-    symbol: Mapped[str] = mapped_column(String(32))
-    strategy: Mapped[str] = mapped_column(String(64))
-    action: Mapped[str] = mapped_column(String(8))          # EXIT | REDUCE
-    reason: Mapped[str] = mapped_column(String(200))
-    price: Mapped[float] = mapped_column(Float)
-    bar_ts: Mapped[datetime] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime)
-    acknowledged: Mapped[bool] = mapped_column(default=False)

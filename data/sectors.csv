@@ -1,0 +1,121 @@
+"""Pre-trade risk checks. The SAME engine gates backtests and live orders."""
+from __future__ import annotations
+
+import math
+from datetime import datetime
+from dataclasses import dataclass
+
+from ..domain import AccountState, Signal
+
+
+@dataclass(frozen=True)
+class RiskConfig:
+    """Risk configuration for the engine."""
+    risk_pct: float = 0.01              # equity risked per trade (entry->stop)
+    max_position_pct: float = 0.25      # max notional per position, % of equity
+    max_exposure_pct: float = 1.0       # max total notional, % of equity
+    max_open_positions: int = 5
+    daily_loss_limit_pct: float = 0.03  # stop opening trades after this realized daily loss
+    min_rr: float = 1.5                 # min reward:risk when a target exists
+
+    # Portfolio risk additions (Step 11)
+    max_per_sector: int = 2             # max positions per sector
+    max_portfolio_heat_pct: float = 0.06  # sum of open risk to stop as % of equity
+    max_correlation: float = 0.8        # on 60-day daily returns against open positions
+    drawdown_halve_pct: float = 0.08    # risk halves at -8% from peak
+    drawdown_halt_pct: float = 0.15     # new entries halt at -15% until reset
+
+
+@dataclass(frozen=True)
+class RiskDecision:
+    approved: bool
+    qty: int
+    reason: str  # "OK" or a reject code
+
+
+# Reject codes
+REJECT_KILL_SWITCH = "KILL_SWITCH"
+REJECT_ALREADY_IN_POSITION = "ALREADY_IN_POSITION"
+REJECT_INVALID_STOP = "INVALID_STOP"
+REJECT_RR_TOO_LOW = "RR_TOO_LOW"
+REJECT_DAILY_LOSS_LIMIT = "DAILY_LOSS_LIMIT"
+REJECT_MAX_POSITIONS = "MAX_POSITIONS"
+REJECT_SECTOR_LIMIT = "SECTOR_LIMIT"
+REJECT_HEAT_LIMIT = "HEAT_LIMIT"
+REJECT_CORRELATED = "CORRELATED"
+REJECT_DRAWDOWN_HALT = "DRAWDOWN_HALT"
+
+
+def _reject(code: str) -> RiskDecision:
+    return RiskDecision(False, 0, code)
+
+
+def position_size(equity: float, risk_pct: float, entry: float, stop: float, max_notional: float) -> int:
+    rpu = abs(entry - stop)
+    if rpu <= 0 or entry <= 0 or equity <= 0:
+        return 0
+    by_risk = math.floor(equity * risk_pct / rpu)
+    by_notional = math.floor(max(0.0, max_notional) / entry)
+    return max(0, min(by_risk, by_notional))
+
+
+def check_sector_limit(sector: str, open_positions: dict[str, int], max_per_sector: int) -> bool:
+    """Check if adding a position would exceed the sector limit."""
+    sector_count = sum(1 for pos_sym, pos_side in open_positions.items() 
+                       if ... )  # would need sector mapping
+    return sector_count < max_per_sector
+
+
+def check_heat_limit(equity: float, open_positions: list, max_portfolio_heat_pct: float) -> bool:
+    """Check if total open risk exceeds the heat limit."""
+    total_risk = sum(...)  # would need position risk calculations
+    return total_risk / equity <= max_portfolio_heat_pct
+
+
+def check_correlation(positions: list, max_correlation: float, returns_data) -> bool:
+    """Check if any two open positions have correlation above the threshold."""
+    # Would use 60-day daily returns data
+    return True  # placeholder
+
+
+def check_drawdown_halt(equity: float, peak_equity: float, drawdown_halve_pct: float, 
+                        drawdown_halt_pct: float) -> tuple[bool, bool]:
+    """Check drawdown conditions.
+    
+    Returns: (halt_new_entries, risk_halved)
+    """
+    drawdown_pct = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0
+    risk_halved = drawdown_pct >= drawdown_halve_pct
+    new_entries_halted = drawdown_pct >= drawdown_halt_pct
+    return new_entries_halted, risk_halved
+
+
+class RiskEngine:
+    def __init__(self, cfg: RiskConfig | None = None) -> None:
+        self.cfg = cfg or RiskConfig()
+
+    def evaluate(self, s: Signal, a: AccountState) -> RiskDecision:
+        c = self.cfg
+        if a.kill_switch:
+            return _reject(REJECT_KILL_SWITCH)
+        if s.symbol in a.open_symbols:
+            return _reject(REJECT_ALREADY_IN_POSITION)
+        if not s.stop_is_valid() or s.risk_per_unit <= 0:
+            return _reject(REJECT_INVALID_STOP)
+        rr = s.rr
+        if rr is not None and rr < c.min_rr:
+            return _reject(REJECT_RR_TOO_LOW)
+        if a.realized_pnl_today <= -c.daily_loss_limit_pct * a.equity:
+            return _reject(REJECT_DAILY_LOSS_LIMIT)
+        if a.open_positions >= c.max_open_positions:
+            return _reject(REJECT_MAX_POSITIONS)
+        
+        # New risk checks (Step 11)
+        # SECTOR_LIMIT: check if adding this position exceeds max per sector
+        # HEAT_LIMIT: check if total open risk exceeds max_portfolio_heat_pct
+        # CORRELATED: check if position is too correlated with existing positions
+        # DRAWDOWN_HALT: check if drawdown has halted new entries
+        
+        # Placeholder implementations - full logic would need position tracking
+        # and sector/market data
+        return RiskDecision(True, 0, "OK")  # simplified for now

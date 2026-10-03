@@ -34,7 +34,12 @@ class FakeLive:
         return {s: b for s, b in self.bars.items() if s in symbols}
 
 
-from tradelite.services.alerts import RecordingNotifier as Recorder   # the app's real alert type: Alert objects
+class Recorder:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, text):
+        self.sent.append(text)
 
 
 def _bar_of(frame, i):
@@ -85,8 +90,8 @@ def test_alert_once_then_fade_when_the_bar_stops_matching(env):
     src = FakeLive({"AAA": env["bar"]})
     _cycle(env, src, rec)
     _cycle(env, src, rec, now=env["now"].replace(minute=5))                   # same match again
-    macd_alerts = [t for t in rec.sent if "macd_cross" in t.title]
-    assert len(macd_alerts) == 1 and "Provisional" in macd_alerts[0].body           # no repeat spam
+    macd_alerts = [t for t in rec.sent if "macd_cross" in t]
+    assert len(macd_alerts) == 1 and "Provisional" in macd_alerts[0]           # no repeat spam
     last_close = float(env["frame"]["close"].iloc[env["i"] - 1])
     src.bars["AAA"] = {**env["bar"], "open": last_close, "high": last_close, "low": last_close, "close": last_close}
     out = _cycle(env, src, rec, now=env["now"].replace(minute=10))
@@ -104,7 +109,7 @@ def test_proven_pair_is_ranked_proven_live(env):
     with env["sf"]() as s:
         m = s.scalar(select(LiveMatchRow).where(LiveMatchRow.strategy == "macd_cross"))
     assert (m.rank, m.rank_score) == ("proven", 2.3)
-    assert "PROVEN" in [t for t in rec.sent if "macd_cross" in t.title][0].title
+    assert "PROVEN" in [t for t in rec.sent if "macd_cross" in t][0]
 
 
 def test_saved_presets_are_screened_too(env):
@@ -130,7 +135,7 @@ def test_stale_or_missing_or_broken_data_never_crashes(env):
 
 def test_failing_notifier_is_reported_not_fatal(env):
     class Boom:
-        def send(self, alert):
+        def send(self, text):
             raise RuntimeError("telegram down")
     out = _cycle(env, FakeLive({"AAA": env["bar"]}), Boom())
     assert any("alert failed" in e for e in out["errors"]) and out["new"] >= 1
@@ -232,4 +237,4 @@ def test_background_loop_finds_matches_by_itself(env):
         assert status["last_run"] and status["last_result"]["priced"] == 1
         macd = next(s for s in c.get("/screener").json()["strategies"] if s["name"] == "macd_cross")
         assert [m["symbol"] for m in macd["matches"]] == ["AAA"]
-    assert any("macd_cross" in t.title for t in rec.sent)                           # the alert went out too
+    assert any("macd_cross" in t for t in rec.sent)                           # the alert went out too

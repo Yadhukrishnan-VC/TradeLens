@@ -54,7 +54,7 @@ export function PresetEditor({ strategy, preset, onSaved, onDeleted, onError }: 
         <button className="btn" onClick={save} disabled={busy || invalid || name.trim() === ""}>{preset ? "Save changes" : "Save settings"}</button>
         {preset && <button className="btn ghost" onClick={remove} disabled={busy}>Delete</button>}
       </div>
-      <p className="muted">Saved settings are tested, ranked and scanned separately from the built-in ones. Saving starts it as a draft: it is not scanned until a backtest passes the stability check, and only you can then switch it on (Strategies page).</p>
+      <p className="muted">Saved settings are tested, ranked and scanned separately from the built-in ones. A new setting is "Unproven" until a backtest shows it holds up.</p>
     </div>
   );
 }

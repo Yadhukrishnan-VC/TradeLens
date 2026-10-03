@@ -25,12 +25,6 @@ class Settings:
     daily_run_at: str = "16:30"          # IST, after the close
     holidays_file: str = ""              # plain file in data_dir with YYYY-MM-DD per line
     refresh_years: int = 5               # full history is re-downloaded every run
-    # Decision support
-    gate_mode: str = "auto"              # off | advisory | enforce | auto (= enforce in auto mode, advisory otherwise)
-    benchmark_symbol: str = "NIFTYBEES"  # stored symbol used to read the market regime
-    enforce_regime: bool = False         # True: a strategy outside its usual regime is held back, not just flagged
-    event_window_days: int = 2           # an event within this many days of a signal makes it risky
-    validation_max_age_days: int = 45    # a "proven" verdict older than this counts as stale
 
 
 def get_settings() -> Settings:
@@ -53,9 +47,4 @@ def get_settings() -> Settings:
         daily_run_at=os.getenv("DAILY_RUN_AT", "16:30"),
         holidays_file=os.getenv("HOLIDAYS_FILE", ""),
         refresh_years=int(os.getenv("REFRESH_YEARS", "5")),
-        gate_mode=os.getenv("GATE_MODE", "auto").lower(),
-        benchmark_symbol=os.getenv("BENCHMARK_SYMBOL", "NIFTYBEES").upper(),
-        enforce_regime=os.getenv("ENFORCE_REGIME", "0") == "1",
-        event_window_days=max(0, int(os.getenv("EVENT_WINDOW_DAYS", "2"))),
-        validation_max_age_days=max(1, int(os.getenv("VALIDATION_MAX_AGE_DAYS", "45"))),
     )
