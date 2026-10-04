@@ -47,46 +47,51 @@ class Settings:
     filters_enforced: bool = False                            # False = shadow: log verdicts, block nothing
 
 
+def _get(name: str, default: str) -> str:
+    """Like os.getenv, but an empty value (`DAILY_RUN_AT=` in .env / env_file) means "use the default"."""
+    return os.getenv(name) or default
+
+
 def _env(name: str, default: str) -> str:
     """TRADELENS_<name>, falling back to the pre-rename TRADELITE_<name> so an old .env keeps working."""
-    return os.getenv(f"TRADELENS_{name}", os.getenv(f"TRADELITE_{name}", default))
+    return _get(f"TRADELENS_{name}", _get(f"TRADELITE_{name}", default))
 
 
 def get_settings() -> Settings:
     """Read settings from the environment at call time (so tests can override)."""
     return Settings(
-        database_url=os.getenv("DATABASE_URL", "sqlite:///tradelens.db"),
-        data_dir=os.getenv("DATA_DIR", "data"),
+        database_url=_get("DATABASE_URL", "sqlite:///tradelens.db"),
+        data_dir=_get("DATA_DIR", "data"),
         demo=_env("DEMO", "0") == "1",
-        starting_capital=float(os.getenv("STARTING_CAPITAL", "100000")),
+        starting_capital=float(_get("STARTING_CAPITAL", "100000")),
         mode=_env("MODE", "semi_auto"),
-        broker=os.getenv("BROKER", "paper"),
-        data_source=os.getenv("DATA_SOURCE", "db"),
-        api_token=os.getenv("API_TOKEN", ""),
-        telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
-        telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
-        alert_webhook_url=os.getenv("ALERT_WEBHOOK_URL", ""),
-        healthcheck_ping_url=os.getenv("HEALTHCHECK_PING_URL", ""),
-        daily_run_at=os.getenv("DAILY_RUN_AT", "16:30"),
-        holidays_file=os.getenv("HOLIDAYS_FILE", ""),
-        refresh_years=float(os.getenv("REFRESH_YEARS", "5")),
-        live_screener=os.getenv("LIVE_SCREENER", "1") == "1",
-        live_interval=max(60, int(os.getenv("LIVE_INTERVAL_SECONDS", "300"))),
-        gate_mode=os.getenv("GATE_MODE", "auto").lower(),
-        benchmark_symbol=os.getenv("BENCHMARK_SYMBOL", "NIFTYBEES").upper(),
-        enforce_regime=os.getenv("ENFORCE_REGIME", "0") == "1",
-        event_window_days=max(0, int(os.getenv("EVENT_WINDOW_DAYS", "2"))),
-        validation_max_age_days=max(1, int(os.getenv("VALIDATION_MAX_AGE_DAYS", "45"))),
-        paper_fill=os.getenv("PAPER_FILL", "next_open"),
-        zerodha_api_key=os.getenv("ZERODHA_API_KEY", ""),
-        zerodha_api_secret=os.getenv("ZERODHA_API_SECRET", ""),
-        zerodha_dry_run=os.getenv("ZERODHA_DRY_RUN", "1") != "0",
-        live_max_order_value=float(os.getenv("LIVE_MAX_ORDER_VALUE", "10000")),
-        live_max_daily_value=float(os.getenv("LIVE_MAX_DAILY_VALUE", "25000")),
-        live_limit_buffer_bps=float(os.getenv("LIVE_LIMIT_BUFFER_BPS", "30")),
-        live_stop_buffer_bps=float(os.getenv("LIVE_STOP_BUFFER_BPS", "150")),
-        live_allow_auto=os.getenv("LIVE_ALLOW_AUTO", "0") == "1",
-        events_file=os.getenv("EVENTS_FILE", ""),
-        event_blackout_days=int(os.getenv("EVENT_BLACKOUT_DAYS", "3")),
-        filters_enforced=os.getenv("FILTERS_ENFORCED", "0") == "1",
+        broker=_get("BROKER", "paper"),
+        data_source=_get("DATA_SOURCE", "db"),
+        api_token=_get("API_TOKEN", ""),
+        telegram_bot_token=_get("TELEGRAM_BOT_TOKEN", ""),
+        telegram_chat_id=_get("TELEGRAM_CHAT_ID", ""),
+        alert_webhook_url=_get("ALERT_WEBHOOK_URL", ""),
+        healthcheck_ping_url=_get("HEALTHCHECK_PING_URL", ""),
+        daily_run_at=_get("DAILY_RUN_AT", "16:30"),
+        holidays_file=_get("HOLIDAYS_FILE", ""),
+        refresh_years=float(_get("REFRESH_YEARS", "5")),
+        live_screener=_get("LIVE_SCREENER", "1") == "1",
+        live_interval=max(60, int(_get("LIVE_INTERVAL_SECONDS", "300"))),
+        gate_mode=_get("GATE_MODE", "auto").lower(),
+        benchmark_symbol=_get("BENCHMARK_SYMBOL", "NIFTYBEES").upper(),
+        enforce_regime=_get("ENFORCE_REGIME", "0") == "1",
+        event_window_days=max(0, int(_get("EVENT_WINDOW_DAYS", "2"))),
+        validation_max_age_days=max(1, int(_get("VALIDATION_MAX_AGE_DAYS", "45"))),
+        paper_fill=_get("PAPER_FILL", "next_open"),
+        zerodha_api_key=_get("ZERODHA_API_KEY", ""),
+        zerodha_api_secret=_get("ZERODHA_API_SECRET", ""),
+        zerodha_dry_run=_get("ZERODHA_DRY_RUN", "1") != "0",
+        live_max_order_value=float(_get("LIVE_MAX_ORDER_VALUE", "10000")),
+        live_max_daily_value=float(_get("LIVE_MAX_DAILY_VALUE", "25000")),
+        live_limit_buffer_bps=float(_get("LIVE_LIMIT_BUFFER_BPS", "30")),
+        live_stop_buffer_bps=float(_get("LIVE_STOP_BUFFER_BPS", "150")),
+        live_allow_auto=_get("LIVE_ALLOW_AUTO", "0") == "1",
+        events_file=_get("EVENTS_FILE", ""),
+        event_blackout_days=int(_get("EVENT_BLACKOUT_DAYS", "3")),
+        filters_enforced=_get("FILTERS_ENFORCED", "0") == "1",
     )

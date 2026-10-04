@@ -92,3 +92,25 @@ def test_risk_reject_is_recorded_not_silent():
 def test_check_exit_short_and_long(side, o, h, l, expect):
     stop, target = (95, 110) if side is Side.BUY else (105, 90)
     assert check_exit(side, stop, target, o, h, l) == expect
+
+
+def test_candidate_needs_a_positive_bootstrap_lower_bound(monkeypatch):
+    """Passing both segments is not enough: the CI on expectancy must clear zero, and more settings tried widens it."""
+    from tradelens.backtest import engine
+    from tradelens.data.synthetic import make_bars
+    from tradelens.strategies import registry
+    df, strat = make_bars("DEMO1", n=2500), registry.get("macd_cross")
+    seen = []
+    real = engine._bootstrap_ci_r
+
+    def fake(trades, n_bootstrap=10_000, block_size=30, alpha_pct=5.0):
+        seen.append(alpha_pct)
+        return (-0.05, 0.4)
+    monkeypatch.setattr(engine, "_bootstrap_ci_r", fake)
+    fit = engine.evaluate_fit(strat, df, "DEMO1", n_trials=10)
+    assert fit["verdict"] != "candidate" and seen == [0.5]       # 5% / 10 settings tried
+    r = [1.0, -0.5, 0.8, -0.4, 1.2, -0.6, 0.9, -0.3, 1.1, -0.5, 0.7, -0.4] * 3
+    trades = [type("T", (), {"r_multiple": x})() for x in r]
+    lo1, _ = real(trades, 2000, alpha_pct=5.0)
+    lo10, _ = real(trades, 2000, alpha_pct=0.5)
+    assert lo10 <= lo1

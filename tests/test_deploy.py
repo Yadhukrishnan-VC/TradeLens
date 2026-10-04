@@ -51,3 +51,11 @@ def test_readme_no_no_login():
     assert "no login yet" not in readme.lower(), (
         "README still contains 'no login yet' — update the documented auth status"
     )
+
+def test_empty_env_values_fall_back_to_defaults(monkeypatch):
+    """`DAILY_RUN_AT=` in .env must mean the default now that compose passes the whole .env through."""
+    from tradelens.config import get_settings
+    for k in ("DAILY_RUN_AT", "REFRESH_YEARS", "LIVE_INTERVAL_SECONDS", "GATE_MODE", "TRADELENS_MODE"):
+        monkeypatch.setenv(k, "")
+    s = get_settings()
+    assert (s.daily_run_at, s.refresh_years, s.live_interval, s.gate_mode, s.mode) == ("16:30", 5.0, 300, "auto", "semi_auto")

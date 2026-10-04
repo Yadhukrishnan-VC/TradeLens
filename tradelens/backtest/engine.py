@@ -161,7 +161,7 @@ def _close(pos: _Open, px: float, ts: datetime, reason: str, cm: CostModel, symb
                  reason=reason, signal_ts=s.ts)
 
 
-def _bootstrap_ci_r(trades: list, n_bootstrap: int = 10_000, block_size: int = 30) -> tuple[float, float]:
+def _bootstrap_ci_r(trades: list, n_bootstrap: int = 10_000, block_size: int = 30, alpha_pct: float = 5.0) -> tuple[float, float]:
     """Seeded 95% bootstrap CI on expectancy in R, block bootstrap by month.
 
     Returns (ci_low, ci_high). If not enough trades, returns (nan, nan).
@@ -200,25 +200,26 @@ def _bootstrap_ci_r(trades: list, n_bootstrap: int = 10_000, block_size: int = 3
             resampled.extend(extra.tolist())
         bootstrap_means.append(np.mean(resampled) if resampled else 0.0)
 
-    lower = np.percentile(bootstrap_means, 2.5)
-    upper = np.percentile(bootstrap_means, 97.5)
+    lower = np.percentile(bootstrap_means, alpha_pct / 2)
+    upper = np.percentile(bootstrap_means, 100 - alpha_pct / 2)
     return (float(lower), float(upper))
 
 
 def evaluate_fit(
-    strategy: Strategy, df: pd.DataFrame, symbol: str, *, split: float = 0.7, min_trades: int = 30, n_bootstrap: int = 10_000, **kw
+    strategy: Strategy, df: pd.DataFrame, symbol: str, *, split: float = 0.7, min_trades: int = 30, n_bootstrap: int = 10_000, n_trials: int = 1, **kw
 ) -> dict:
     """Stability check, NOT proof of edge: one full run, trades split by entry time into an
-    early and a late segment. 'candidate' needs enough trades AND positive expectancy with
-    profit factor > 1.2 in BOTH segments. Everything else has no edge."""
+    early and a late segment. 'candidate' needs enough trades, positive expectancy with
+    profit factor > 1.2 in BOTH segments, AND a bootstrap lower bound on expectancy above 0. Everything else has no edge."""
     res = run_backtest(strategy, df, symbol, **kw)
     cut = df.index[int(len(df) * split)]
     early = [t for t in res.trades if t.entry_ts < cut]
     late = [t for t in res.trades if t.entry_ts >= cut]
     m_all, m_early, m_late = res.metrics, compute_metrics(early), compute_metrics(late)
 
-    # Bootstrap CI on overall expectancy in R
-    ci_low, ci_high = _bootstrap_ci_r(res.trades, n_bootstrap)
+    # Bootstrap CI on expectancy in R. The more settings were tried on this stock, the wider the interval
+    # (Bonferroni: 5% / n_trials), so luck across many tries cannot pass as an edge.
+    ci_low, ci_high = _bootstrap_ci_r(res.trades, n_bootstrap, alpha_pct=5.0 / max(1, min(n_trials, 20)))
 
     def ok(m: dict) -> bool:
         pf = m["profit_factor"]
@@ -226,7 +227,7 @@ def evaluate_fit(
 
     if m_all["n_trades"] < min_trades:
         verdict = "insufficient_data"
-    elif ok(m_early) and ok(m_late):
+    elif ok(m_early) and ok(m_late) and ci_low > 0:      # NaN (too few R values) fails this, by design
         verdict = "candidate"
     else:
         verdict = "no_edge"

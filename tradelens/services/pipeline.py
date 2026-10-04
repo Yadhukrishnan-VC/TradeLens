@@ -165,7 +165,8 @@ class Pipeline:
     def _decorate(self, row: SignalRow, sig: Signal, qual, meta, regime) -> None:
         """Attach what a human needs to judge the signal: data quality, upcoming events, regime, gate verdict."""
         evs = events.upcoming(self.s, sig.symbol, sig.ts.date(), self.gate_cfg.event_window_days)
-        off_regime = bool(meta.regimes) and regime.trend != "unknown" and regime.trend not in meta.regimes
+        off_regime = bool(meta.regimes) and (regime.trend not in meta.regimes if regime.trend != "unknown"
+                                             else self.gate_cfg.enforce_regime)   # unknown: fail closed only when enforcing
         flags = list(qual.flags) + [f"EVENT:{e.kind}" for e in evs[:2]] + (["OFF_REGIME"] if off_regime else [])
         row.quality, row.flags = qual.level, ",".join(flags)[:120]
         row.regime = regime.label if regime.label != "unknown" else ""

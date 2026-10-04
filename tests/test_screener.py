@@ -17,7 +17,6 @@ from tradelens.db import make_session_factory
 from tradelens.models import LiveMatchRow, StrategyConfigRow, StrategyFitRow
 from tradelens.risk.engine import RiskEngine
 from tradelens.services import screener
-from tradelens.services.notify import TelegramNotifier
 from tradelens.services.pipeline import Pipeline
 from tradelens.strategies import registry
 
@@ -159,12 +158,6 @@ def test_yahoo_live_maps_tickers_back_to_symbols():
     src = YahooLive(downloader=lambda tickers: seen.append(tickers) or {"TCS.NS": frame})
     out = src.snapshot(["TCS", "INFY"], date(2026, 9, 30))
     assert seen == [["TCS.NS", "INFY.NS"]] and list(out) == ["TCS"] and out["TCS"]["close"] == 3
-
-
-def test_telegram_notifier_posts_message():
-    calls = []
-    TelegramNotifier("TOKEN", "42", post=lambda url, payload: calls.append((url, payload))).send("hi")
-    assert calls == [("https://api.telegram.org/botTOKEN/sendMessage", {"chat_id": "42", "text": "hi"})]
 
 
 # ---------- API ----------

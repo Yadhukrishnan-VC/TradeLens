@@ -22,7 +22,7 @@ Try it without any real data: `TRADELENS_DEMO=1 docker compose up --build` (synt
 ## Run it without Docker
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]" && pytest                # 201 tests
+pip install -e ".[dev]" && pytest                # ~300 tests
 DATABASE_URL=postgresql://user:pass@localhost:5432/tradelens \
   uvicorn tradelens.api.main:create_app --factory --port 8000     # or leave DATABASE_URL unset for SQLite
 ```

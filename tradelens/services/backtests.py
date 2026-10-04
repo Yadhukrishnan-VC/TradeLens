@@ -49,8 +49,10 @@ def run_and_store(
     if timeframe not in strat.meta.timeframes:
         raise ValueError(f"{strategy_name} does not support timeframe {timeframe}")
     df = provider.get_bars(symbol, timeframe)
+    tried = set(session.scalars(select(TrialsRow.config_name).where(
+        TrialsRow.strategy == strategy_name, TrialsRow.symbol == symbol)).all()) | {config_name}
     fit = evaluate_fit(strat, df, symbol, capital=capital, risk=risk, cost_model=cost_model,
-                       slippage_bps=slippage_bps)
+                       slippage_bps=slippage_bps, n_trials=len(tried))
     res = fit["result"]
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     trades = [

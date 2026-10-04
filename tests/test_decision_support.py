@@ -466,6 +466,19 @@ def test_off_regime_is_flagged_and_only_blocks_when_enforced(pipeline_factory, s
     assert (row.status, row.reason) == ("gated", "OFF_REGIME")
 
 
+def test_unknown_regime_blocks_only_when_regime_is_enforced(pipeline_factory, session):
+    """No benchmark stored = regime unknown. Fail closed when the user enforces regimes; stay quiet otherwise."""
+    f = _edge_frame("macd_cross", "DEMO1")
+    _mark_proven(session, "macd_cross", "default", "AAA")
+    prov = FixedProvider({"AAA": f})                                                    # benchmark missing
+    mk = lambda **kw: pipeline_factory(Mode.SEMI_AUTO, provider=prov, benchmark="BENCH", clock=lambda: CLOCK, **kw)
+    (row,) = mk(gate=GateConfig("enforce")).scan(symbols=["AAA"], strategy_names=["macd_cross"])
+    assert "OFF_REGIME" not in row.flags and row.status == "proposed"
+    session.query(OrderRow).delete(); session.query(SignalRow).delete(); session.commit()
+    (row,) = mk(gate=GateConfig("enforce", enforce_regime=True)).scan(symbols=["AAA"], strategy_names=["macd_cross"])
+    assert (row.status, row.reason) == ("gated", "OFF_REGIME")
+
+
 def test_gate_never_touches_backtests():
     """A gate that blocked backtests could never collect the evidence it demands. Same results with it fully on."""
     out = {}
