@@ -18,7 +18,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27", "kiteconnect>=5.1"]
+zerodha = ["kiteconnect>=5.1"]   # needed only for BROKER=zerodha (5.1+ supports market_protection)
 
 [tool.setuptools.packages.find]
 include = ["tradelens*"]

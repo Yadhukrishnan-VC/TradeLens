@@ -9,11 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..backtest.costs import DELIVERY_EQUITY, CostModel
-from ..broker.base import Broker
+from ..broker.base import Broker, BrokerError, BrokerUncertain
 from ..data.base import DataProvider
 from ..domain import AccountState, Mode, Side, Signal
 from ..exits import check_exit
-from ..models import Account, OrderRow, PositionAlertRow, PositionRow, SignalRow, StrategyFitRow, WatchRow
+from ..models import Account, FilterLogRow, OrderRow, PositionAlertRow, PositionRow, SignalRow, StrategyFitRow, WatchRow
 from ..risk.engine import RiskEngine
 from ..strategies import registry
 from . import context, events, gate, lifecycle, presets, quality, ranking
@@ -44,6 +44,7 @@ class Pipeline:
         gate: GateConfig | None = None,
         benchmark: str = "",
         stale_check: bool = False,
+        filters: list | None = None,
     ) -> None:
         self.s, self.provider, self.broker = session, provider, broker
         self.risk = risk or RiskEngine()
@@ -55,6 +56,7 @@ class Pipeline:
         self.benchmark = benchmark
         self.stale_check = stale_check            # flag symbols whose last bar is older than the universe's newest bar
         self.last_watch: list[dict] = []          # setups close to triggering, found by the last scan
+        self.filters = filters or []
 
     # ---------- account ----------
     def account(self) -> Account:
@@ -219,6 +221,22 @@ class Pipeline:
             key += f"|{config_name}"
         return hashlib.sha1(key.encode()).hexdigest()[:16]
 
+    def _run_filters(self, row: SignalRow, sig: Signal) -> str | None:
+        """Signal filters can only VETO (never size up or add trades). Shadow filters are logged but never block.
+        An enforced filter that crashes blocks the trade (and says so): fail closed."""
+        veto = None
+        for f in self.filters:
+            try:
+                allow, why = f.check(sig, self.clock())
+            except Exception as e:  # noqa: BLE001
+                allow, why = (not f.enforced), f"filter error: {type(e).__name__}"
+                self._alert("warning", f"Signal filter {f.name} crashed", why)
+            self.s.add(FilterLogRow(signal_id=row.id, filter=f.name, verdict="allow" if allow else "veto",
+                                    enforced=f.enforced, reason=why[:300], created_at=self.clock()))
+            if not allow and f.enforced and veto is None:
+                veto = f"FILTER_{f.name}"[:64]
+        return veto
+
     def _route(self, row: SignalRow, sig: Signal) -> None:
         if row.quality == "bad":     # never open a trade from data we do not trust (the signal stays visible)
             row.status, row.reason = "rejected", "DATA_QUALITY"
@@ -229,6 +247,10 @@ class Pipeline:
         decision = self.risk.evaluate(sig, self.account_state())
         if not decision.approved:
             row.status, row.reason = "rejected", decision.reason
+            return
+        veto = self._run_filters(row, sig)
+        if veto:
+            row.status, row.reason = "rejected", veto
             return
         row.suggested_qty = decision.qty
         if self.mode is Mode.SIGNAL_ONLY:
@@ -248,21 +270,105 @@ class Pipeline:
     # ---------- orders ----------
     def _execute(self, order: OrderRow, sig_row: SignalRow) -> None:
         side = Side(order.side)
-        fill = self.broker.place_order(symbol=order.symbol, side=side, qty=order.qty,
-                                       price=sig_row.entry, tag=order.tag)
+        try:
+            fill = self.broker.place_order(symbol=order.symbol, side=side, qty=order.qty, price=sig_row.entry,
+                                           tag=order.tag, signal_ts=sig_row.ts)
+        except BrokerUncertain as e:
+            order.status, order.reason = "UNCERTAIN", "BROKER_UNCERTAIN"
+            sig_row.status, sig_row.reason = "rejected", "BROKER_UNCERTAIN"
+            self._alert("critical", f"UNKNOWN whether {order.side} {order.qty} {order.symbol} reached the broker",
+                        f"{e}. Check the broker's order book NOW; tradelens will not retry this order (tag {order.tag}).")
+            return
+        except BrokerError as e:
+            order.status, order.reason = "REJECTED", "BROKER_REJECTED"
+            sig_row.status, sig_row.reason = "rejected", "BROKER_REJECTED"
+            self._alert("critical", f"Broker refused {order.side} {order.qty} {order.symbol}", str(e)[:300])
+            return
+        if fill.status == "OPEN":
+            order.status, order.broker_order_id, order.submitted_at = "SUBMITTED", fill.order_id, self.clock()
+            sig_row.status = "submitted"
+            return
         if fill.status != "FILLED":
             order.status, order.reason = "REJECTED", "BROKER_REJECTED"
             sig_row.status, sig_row.reason = "rejected", "BROKER_REJECTED"
             self._alert("critical", f"Broker rejected {order.side} {order.qty} {order.symbol}",
-                        f"strategy={sig_row.strategy} order tag={order.tag}")
+                        f"strategy={sig_row.strategy} order tag={order.tag} {fill.reason}".strip())
             return
+        order.broker_order_id = fill.order_id
+        self._fill_entry(order, sig_row, fill)
+
+    def _fill_entry(self, order: OrderRow, sig_row: SignalRow, fill) -> None:
+        side = Side(order.side)
+        qty = fill.done_qty
         order.status, order.price = "FILLED", fill.price
-        self.s.add(PositionRow(
-            symbol=order.symbol, strategy=sig_row.strategy, side=order.side, qty=fill.qty,
+        pos = PositionRow(
+            symbol=order.symbol, strategy=sig_row.strategy, side=order.side, qty=qty,
             entry_price=fill.price, stop=sig_row.stop, target=sig_row.target,
-            entry_costs=self.cost_model.cost(side, fill.price, fill.qty),
-            signal_bar_ts=sig_row.ts, opened_at=self.clock()))
+            entry_costs=self.cost_model.cost(side, fill.price, qty), signal_entry=sig_row.entry,
+            signal_bar_ts=sig_row.ts, opened_at=self.clock())
+        self.s.add(pos)
+        self.s.flush()
         sig_row.status = "executed"
+        if qty < order.qty:
+            order.reason = "PARTIAL"
+            self._alert("warning", f"Partial fill {order.symbol}: {qty} of {order.qty}", "The position is sized to what filled.")
+        if side is Side.BUY:
+            self._protect(pos)
+
+    def _protect(self, pos: PositionRow) -> None:
+        """Put the stop at the exchange so a gap or an outage while we are not looking cannot run the loss."""
+        if not self.broker.supports_exchange_stops:
+            return
+        try:
+            pos.broker_stop_id = self.broker.place_protective_stop(symbol=pos.symbol, qty=pos.qty, trigger=pos.stop,
+                                                                   tag=f"s{pos.id}")
+        except BrokerError as e:
+            pos.broker_stop_id = None
+            self._alert("critical", f"{pos.symbol}: NO exchange-side stop", f"{e}. Only the software stop protects it.")
+            return
+        if pos.broker_stop_id is None:
+            self._alert("critical", f"{pos.symbol}: NO exchange-side stop", "The broker did not accept it. Only the software stop protects it.")
+
+    def sync_orders(self) -> list[OrderRow]:
+        """Collect results of orders the broker still held: entries become positions, pending exits close them."""
+        changed: list[OrderRow] = []
+        for order in self.s.scalars(select(OrderRow).where(OrderRow.status == "SUBMITTED")).all():
+            sig_row = self.s.get(SignalRow, order.signal_id)
+            try:
+                f = self.broker.get_order(order.broker_order_id)
+            except (BrokerError, NotImplementedError, KeyError):
+                continue
+            if f.status == "FILLED":
+                self._fill_entry(order, sig_row, f)
+            elif f.status in ("REJECTED", "CANCELLED"):
+                if f.done_qty > 0:
+                    self._fill_entry(order, sig_row, f)
+                else:
+                    order.status, order.reason = f.status, (f.reason or f.status)[:64]
+                    sig_row.status, sig_row.reason = "rejected", order.reason
+                    self._alert("warning", f"{order.symbol} entry not filled ({f.status.lower()})",
+                                f"{order.side} {order.qty}. {f.reason}".strip())
+            elif order.submitted_at and self.clock() - order.submitted_at > timedelta(days=3):
+                self.broker.cancel_order(order.broker_order_id)
+                self._alert("critical", f"{order.symbol} order stuck for 3+ days", "Cancel requested. Check the broker.")
+            else:
+                continue
+            changed.append(order)
+        for pos in self.s.scalars(select(PositionRow).where(PositionRow.closed_at.is_(None),
+                                                            PositionRow.exit_order_id.is_not(None))).all():
+            try:
+                f = self.broker.get_order(pos.exit_order_id)
+            except (BrokerError, NotImplementedError, KeyError):
+                continue
+            if f.status == "FILLED":
+                self._close_position(pos, f.price, pos.exit_pending_reason or "exit")
+            elif f.status in ("REJECTED", "CANCELLED"):
+                pos.exit_order_id = None
+                self._alert("critical", f"EXIT ORDER FAILED for {pos.symbol}",
+                            f"{pos.exit_pending_reason} exit was {f.status.lower()} ({f.reason}). The position is still open; "
+                            f"the next check retries.".replace("( )", ""))
+        self.s.commit()
+        return changed
 
     def approve(self, order_id: int) -> OrderRow:
         order = self.s.get(OrderRow, order_id)
@@ -297,28 +403,62 @@ class Pipeline:
         return order
 
     # ---------- exits (stop/target are ALWAYS automatic, in every mode) ----------
+    def _close_position(self, pos: PositionRow, price: float, reason: str) -> None:
+        side = Side(pos.side)
+        gross = (price - pos.entry_price) * pos.qty * side.sign
+        pos.exit_price, pos.exit_reason = price, reason
+        pos.pnl = gross - pos.entry_costs - self.cost_model.cost(side.opposite, price, pos.qty)
+        pos.closed_at = self.clock()
+        pos.exit_order_id = pos.exit_pending_reason = None
+
     def check_exits(self) -> list[PositionRow]:
         closed: list[PositionRow] = []
+        self.sync_orders()
         for pos in self.s.scalars(select(PositionRow).where(PositionRow.closed_at.is_(None))).all():
+            if pos.exit_order_id:
+                continue                      # an exit is already with the broker: wait for it
             side = Side(pos.side)
+            if pos.broker_stop_id:
+                st = self.broker.stop_status(pos.broker_stop_id)
+                if st is not None and st.status == "FILLED":
+                    self._close_position(pos, st.price, "stop")
+                    closed.append(pos)
+                    continue
+                if st is not None and st.status in ("REJECTED", "CANCELLED"):
+                    self._alert("critical", f"{pos.symbol}: exchange-side stop is gone ({st.status.lower()})",
+                                f"{st.reason}. Re-protecting now.".strip())
+                    pos.broker_stop_id = None
+                    self._protect(pos)
             bars = self.provider.get_bars(pos.symbol)
             bars = bars[bars.index > pos.signal_bar_ts]
             for _, bar in bars.iterrows():
                 px, reason = check_exit(side, pos.stop, pos.target, bar["open"], bar["high"], bar["low"])
                 if px is None:
                     continue
-                fill = self.broker.place_order(symbol=pos.symbol, side=side.opposite, qty=pos.qty,
-                                               price=px, tag=f"x{pos.id}")
+                if pos.broker_stop_id:
+                    if not self.broker.cancel_protective_stop(pos.broker_stop_id):
+                        self._alert("critical", f"{pos.symbol}: cannot cancel the exchange stop",
+                                    "Not selling from here, to avoid a double exit. Check the broker.")
+                        break
+                    pos.broker_stop_id = None
+                pos.exit_attempts = (pos.exit_attempts or 0) + 1
+                tag = f"x{pos.id}" + (f"r{pos.exit_attempts - 1}" if pos.exit_attempts > 1 else "")
+                try:
+                    fill = self.broker.place_order(symbol=pos.symbol, side=side.opposite, qty=pos.qty, price=px, tag=tag,
+                                                   signal_ts=None)
+                except BrokerError as e:
+                    self._alert("critical", f"EXIT ORDER FAILED for {pos.symbol}", f"{reason}: {e}. Position still open.")
+                    break
+                if fill.status == "OPEN":
+                    pos.exit_order_id, pos.exit_pending_reason = fill.order_id, reason
+                    break
                 if fill.status != "FILLED":
                     # the position is still open although its exit was triggered: a human must look
                     self._alert("critical", f"EXIT ORDER FAILED for {pos.symbol}",
                                 f"{reason} triggered at {px:.2f} but the broker rejected the {side.opposite.value} of {pos.qty}. "
                                 f"The position is still open; the next check will retry.")
                     break
-                gross = (fill.price - pos.entry_price) * pos.qty * side.sign
-                pos.exit_price, pos.exit_reason = fill.price, reason
-                pos.pnl = gross - pos.entry_costs - self.cost_model.cost(side.opposite, fill.price, pos.qty)
-                pos.closed_at = self.clock()
+                self._close_position(pos, fill.price, reason)
                 closed.append(pos)
                 break
         self.s.commit()
@@ -362,3 +502,21 @@ class Pipeline:
                         "nothing was sold. Decide yourself.")
         self.s.commit()
         return created
+    # ---------- reconciliation: the broker is the source of truth ----------
+    def reconcile(self) -> list[str]:
+        """Compare what we think we hold with what the broker says. Reports differences; never 'fixes' them."""
+        held = self.broker.held_quantities()
+        if held is None:
+            return []
+        ours: dict[str, int] = {}
+        for p in self.s.scalars(select(PositionRow).where(PositionRow.closed_at.is_(None))).all():
+            ours[p.symbol] = ours.get(p.symbol, 0) + (p.qty if p.side == "BUY" else -p.qty)
+        issues = []
+        for sym in sorted(set(ours) | set(held)):
+            a, b = ours.get(sym, 0), held.get(sym, 0)
+            if b < a:      # broker holding MORE is normally your own investments: not our business
+                issues.append(f"{sym}: tradelens thinks it holds {a}, the broker shows {b}")
+        if issues:
+            self._alert("critical", "Position mismatch with the broker", "\n".join(issues[:15]) +
+                        "\nNothing was changed. Resolve by hand, then keep the kill switch on until they agree.")
+        return issues

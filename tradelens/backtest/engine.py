@@ -38,6 +38,7 @@ class Trade:
     risk_amount: float | None = None    # risk at entry (for r-multiple)
     r_multiple: float | None = None     # net_pnl / risk_amount
     reason: str = ""                    # reason for exit (stop, target, end_of_data, etc.)
+    signal_ts: datetime | None = None   # the bar whose close produced the signal
 
 
 @dataclass
@@ -157,7 +158,7 @@ def _close(pos: _Open, px: float, ts: datetime, reason: str, cm: CostModel, symb
     r_multiple = (gross - costs) / risk_amount if risk_amount and risk_amount != 0 else None
     return Trade(symbol, s.strategy, s.side.value, pos.entry_ts, pos.entry_price, ts, px,
                  pos.qty, gross, costs, gross - costs, risk_amount=risk_amount, r_multiple=r_multiple,
-                 reason=reason)
+                 reason=reason, signal_ts=s.ts)
 
 
 def _bootstrap_ci_r(trades: list, n_bootstrap: int = 10_000, block_size: int = 30) -> tuple[float, float]:

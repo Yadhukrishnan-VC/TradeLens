@@ -158,7 +158,7 @@ test("strategy lifecycle, event calendar and position advice", async () => {
   fireEvent.click(await within(table).findByRole("button", { name: "Restore as draft" }));   // only a retired row offers this
   await waitFor(() => expect(within(table).queryByRole("button", { name: "Restore as draft" })).toBeNull());
   expect(within(within(table).getByText("quick").closest("tr")!).getByText("Draft")).toBeTruthy();
-  expect(within(table).getAllByText("Active").length).toBe(7);                       // the built-ins are active
+  expect(within(table).getAllByText("Active").length).toBe(10);                      // the 10 built-ins (7 classic + 3 SMC) are active
 
   // events: add one, see it, remove it
   fireEvent.click(screen.getByRole("button", { name: "Data" }));

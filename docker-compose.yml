@@ -28,7 +28,16 @@ services:
       TRADELENS_DEMO: ${TRADELENS_DEMO:-0}
       TRADELENS_MODE: ${TRADELENS_MODE:-semi_auto}
       STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
-      BROKER: paper
+      BROKER: ${BROKER:-paper}
+      PAPER_FILL: ${PAPER_FILL:-next_open}
+      ZERODHA_API_KEY: ${ZERODHA_API_KEY:-}
+      ZERODHA_API_SECRET: ${ZERODHA_API_SECRET:-}
+      ZERODHA_DRY_RUN: ${ZERODHA_DRY_RUN:-1}
+      LIVE_MAX_ORDER_VALUE: ${LIVE_MAX_ORDER_VALUE:-10000}
+      LIVE_MAX_DAILY_VALUE: ${LIVE_MAX_DAILY_VALUE:-25000}
+      LIVE_ALLOW_AUTO: ${LIVE_ALLOW_AUTO:-0}
+      EVENTS_FILE: ${EVENTS_FILE:-}
+      FILTERS_ENFORCED: ${FILTERS_ENFORCED:-0}
       LIVE_SCREENER: ${LIVE_SCREENER:-1}
       GATE_MODE: ${GATE_MODE:-auto}
       BENCHMARK_SYMBOL: ${BENCHMARK_SYMBOL:-NIFTYBEES}
@@ -39,7 +48,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
-      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelens token)}
+      API_TOKEN: ${API_TOKEN:?set API_TOKEN in .env (python -m tradelens token)}
     volumes:
       - ./data:/app/data:ro          # optional: SYMBOL.csv files for `import-csv`
     # Token auth protects the API, but keep it bound to this machine; put HTTPS in front before exposing it.
@@ -64,8 +73,17 @@ services:
       TRADELENS_DEMO: ${TRADELENS_DEMO:-0}
       TRADELENS_MODE: ${TRADELENS_MODE:-semi_auto}
       STARTING_CAPITAL: ${STARTING_CAPITAL:-100000}
-      BROKER: paper
-      API_TOKEN: ${API_TOKEN?set API_TOKEN in .env (python -m tradelens token)}
+      BROKER: ${BROKER:-paper}
+      PAPER_FILL: ${PAPER_FILL:-next_open}
+      ZERODHA_API_KEY: ${ZERODHA_API_KEY:-}
+      ZERODHA_API_SECRET: ${ZERODHA_API_SECRET:-}
+      ZERODHA_DRY_RUN: ${ZERODHA_DRY_RUN:-1}
+      LIVE_MAX_ORDER_VALUE: ${LIVE_MAX_ORDER_VALUE:-10000}
+      LIVE_MAX_DAILY_VALUE: ${LIVE_MAX_DAILY_VALUE:-25000}
+      LIVE_ALLOW_AUTO: ${LIVE_ALLOW_AUTO:-0}
+      EVENTS_FILE: ${EVENTS_FILE:-}
+      FILTERS_ENFORCED: ${FILTERS_ENFORCED:-0}
+      API_TOKEN: ${API_TOKEN:?set API_TOKEN in .env (python -m tradelens token)}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}

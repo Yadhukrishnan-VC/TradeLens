@@ -22,7 +22,7 @@ Try it without any real data: `TRADELENS_DEMO=1 docker compose up --build` (synt
 ## Run it without Docker
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]" && pytest                # 80 tests
+pip install -e ".[dev]" && pytest                # 201 tests
 DATABASE_URL=postgresql://user:pass@localhost:5432/tradelens \
   uvicorn tradelens.api.main:create_app --factory --port 8000     # or leave DATABASE_URL unset for SQLite
 ```
@@ -35,11 +35,42 @@ UI end-to-end test (real seeded server): `python scripts/seed_e2e.py <db-url>`, 
 `TRADELENS_DEMO=1 DATABASE_URL=<db-url>` on port 8766, then `cd frontend && TL_API=http://127.0.0.1:8766 npm run test:e2e`.
 
 ## Strategies
-Seven built in, all long-only daily-bar strategies with an ATR stop and an R-multiple target:
-`ema_cross`, `donchian_breakout`, `ema_pullback`, `macd_cross`, `rsi_reversion`, `bollinger_breakout`, `new_high_momentum`
-(trend, breakout, pullback, momentum and mean-reversion styles). Each is checked automatically for look-ahead bias.
+Ten built in, all long-only daily-bar strategies with a stop and an R-multiple target.
+Classic: `ema_cross`, `donchian_breakout`, `ema_pullback`, `macd_cross`, `rsi_reversion`, `bollinger_breakout`, `new_high_momentum`.
+Smart Money Concepts: `smc_fvg`, `smc_order_block`, `smc_sweep` (rules below). Each is checked automatically for look-ahead bias.
 There is no such thing as "the best strategy": what works depends on the stock and the period, which is why the
 platform tests every strategy on every stock and only ranks up the ones that hold up (below).
+
+## Smart Money Concepts (SMC) strategies
+
+`tradelens/smc.py` turns the usual SMC vocabulary into explicit rules, computed in one forward pass (nothing at bar i uses a later bar).
+SMC terms are defined differently by different traders; **these are my definitions, written down so you can check them against
+yours** (and so the tests can pin them). Change a rule in `smc.py` and its test together.
+
+| Concept | Rule here |
+|---|---|
+| Swing high / low | bar whose high (low) is strictly beyond the `swing_left` bars before it and at least as far as the `swing_right` bars after it. **Only known `swing_right` bars later**, never at the pivot bar. |
+| BOS / CHoCH | a bar **closes** beyond the latest unbroken swing high (low). It is a **BOS** if the structure was already in that direction (or undefined), a **CHoCH** if it was the other way. A wick through the level is not a break. |
+| Structure bias | +1 after an up-break, -1 after a down-break, 0 before the first break |
+| Fair value gap | candles j-2, j-1, j with `low[j] > high[j-2]`; the gap is `[high[j-2], low[j]]` (long side only). Known at the close of j. |
+| Order block | when an up-break happens, the candle with the **lowest low since the broken swing high** (origin of the leg). Zone = its `[low, high]` (or body). |
+| Premium / discount | dealing range = latest swing low to the highest high since; close at or below the midpoint = discount |
+| Retest | the **first** bar after the zone formed whose low trades into it. A zone is used once. |
+| Liquidity sweep | a bar's low pierces a still-untouched swing low (or the lowest low of the last `range_n` bars) and it **closes back above** that level, with a lower wick. |
+
+* `smc_fvg`: buy the retest of a bullish FVG that was left by a real up-candle (`min_disp_atr`), formed in bullish structure, still bullish at entry.
+* `smc_order_block`: buy the retest of the bullish order block of a structure break (`mode`: `bos`, `choch`, `any`; `min_leg_atr` filters weak impulses; `require_fvg` demands a gap in the impulse too).
+* `smc_sweep`: buy the close back above a swept swing low / N-bar low; stop under the sweep low (`bias`: `any`, `not_bearish`, `bullish`).
+* **Entry** (`entry_mode`): `confirm` (default) waits up to `confirm_bars` bars after the first touch for a **close back above the zone's top**; `touch` enters on the first-touch bar if it closes up.
+  A close below the zone's bottom spends the zone. The stop sits `stop_buf_atr` ATRs under the lower of the zone bottom and the lowest low since the touch, never closer than `min_risk_atr` ATRs; target = `rr` x risk.
+* All filters are parameters, so the platform's customise/track-record/"proven" machinery treats each variant as its own strategy.
+
+**What this is not.** No evidence that any of it has an edge: on random data they trade and lose like anything else, and real
+results depend on the market. They go through the same backtest, benchmark, and paper-trading checks as the rest, and rank as
+"unproven" until they pass the gate. Not included: shorts (the platform is long-only and delivery CNC cannot short), breaker/mitigation
+blocks, inducement, equal-highs/lows pools, session/kill-zone timing and higher-timeframe bias (needs intraday data; this
+is daily bars). Entries use the signal bar's close and fill at the next open, so a gap past the plan can fail the risk engine's
+reward:risk check (`RR_TOO_LOW`): tight-stop setups like these hit it often.
 
 **Customise**: Backtests page, *Customise this strategy's settings*. Change the numbers, name them, save. Saved settings
 are scanned alongside the built-in ones and get their own track record. `GET/POST/DELETE /strategy-configs`.
@@ -180,6 +211,61 @@ three attempts in total, then a critical alert. Everything is idempotent, so ret
   127.0.0.1 and put HTTPS in front (reverse proxy) before exposing it, because a bearer token over plain HTTP can be read on the network.
 * **Equity is marked to market.** Open positions are valued at the latest close, so an open loss now shrinks new position sizes (before, only
   closed P&L counted). A position with no price is marked at entry and reported as `unpriced_positions`. `GET /account` shows `unrealized_pnl`.
+
+## Paper trading that can be compared with the backtest
+
+`PAPER_FILL=next_open` (the default for the API/worker; demo mode always fills at once) makes paper **entries** wait and fill at the
+OPEN of the session after the signal, plus slippage: the backtest's assumption. Approving an order now returns `SUBMITTED`; the next daily
+run collects the fill (`POST /orders/sync` does it on demand). Exits fill at the triggered price, as in the backtest. The pending state is
+encoded in the order id, so the API process and the worker process can each answer for orders the other placed.
+
+The daily job writes one equity snapshot per trading day. After a few weeks:
+
+```
+python -m tradelens review            # or GET /paper-review
+```
+It replays the same strategies over the same days and checks four things: the replay's signals appear live, fills match the model
+(median entry gap), the daily job ran, and the equity curves stay close. It also lists missing signals with a likely cause.
+
+**What 4-8 weeks can and cannot show.** It shows whether the system behaves like its backtest (implementation fidelity). It cannot show
+profit: a handful of trades gives a win-rate interval like 31%-86%, which the report prints so nobody mistakes luck for an edge. Judge the
+edge from the long backtest. Live sizing differs slightly from the replay on purpose: the order is sized before the open is known, the
+replay sizes at the actual fill (in a 70-day simulation this alone produced a 0.8pp equity gap with identical trades and exits).
+
+## Going live with Zerodha (read all of it)
+
+The adapter exists and is tested against a fake Kite client and the real SDK's method signatures. It has **never talked to Zerodha**:
+there is no sandbox, so the first real order is also the first real test. Plan for that.
+
+Prerequisites (from Zerodha's current docs; re-check them):
+1. A Kite Connect app (the free "Personal" plan has orders and GTT but no market data; data stays on yfinance here).
+2. A **static IP** registered in the developer console. Orders from any other IP are rejected. It must equal your server's exact
+   public egress IP (IPv4 vs IPv6 mismatches are a known trap). Changes are limited to once a week.
+3. **Exchange-side stops use GTT**, which places a LIMIT order when triggered. A gap through the limit leaves the shares unsold, and selling
+   held shares can need CDSL TPIN authorisation or a pre-authorisation. Check that on your account first. tradelens reports a triggered
+   but unfilled stop as a critical alert and keeps its own software stop as a second line; neither is a guarantee.
+4. Daily login: `python -m tradelens kite-login` each trading morning (tokens expire around 06:00 IST). A missing session raises a critical alert.
+
+Order of events, each only after the previous one is boring:
+```
+BROKER=zerodha ZERODHA_DRY_RUN=1     # everything runs, no order is sent; rejected orders say what they WOULD have placed
+python -m tradelens kite-check       # session, funds, caps; places nothing
+ZERODHA_DRY_RUN=0 TRADELENS_MODE=semi_auto LIVE_MAX_ORDER_VALUE=<one small position>
+```
+Safety rails that do not depend on the risk engine: per-order and per-day BUY value caps counted from Zerodha's own order book, limit
+orders only (a marketable-limit cushion of `LIVE_LIMIT_BUFFER_BPS`, so no market-protection setting is needed), `TRADELENS_MODE=auto`
+refused unless `LIVE_ALLOW_AUTO=1`, orders idempotent on their tag, and a timeout checks the order book by tag before saying anything.
+If it cannot tell whether an order went out, the order is marked `UNCERTAIN`, you get a critical alert, and nothing is retried.
+After-hours orders go in as AMO; the session-window rule is a guess to verify on your first day. After every daily run, positions are
+reconciled with the broker (it alarms when the broker holds LESS than you think, never "fixes" anything).
+
+## Signal filters (news / events / AI): shadow first
+
+A filter can only veto a trade the risk engine already approved. `EVENT_BLACKOUT_DAYS` + `EVENTS_FILE` (a CSV you maintain:
+`symbol,date,kind`) skips signals whose position would be open through a results date or ex-dividend. With `FILTERS_ENFORCED=0` it only logs
+(table `filter_log`); the review compares vetoed vs allowed trades. Enforce a filter only after that comparison shows it helps, on far more
+than a few trades. An LLM/news filter should be added the same way, as one more shadow filter; none is included, because there is no
+free, reliable news feed to build it against.
 
 ## Guarantees the tests enforce
 Fills at next bar open (no look-ahead) · stop beats target inside one bar · gaps fill at the open ·

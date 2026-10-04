@@ -13,7 +13,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY tradelens ./tradelens
 # editable install keeps the package next to frontend/dist, which is where the app looks for the UI
-RUN pip install -e .
+RUN pip install -e ".[zerodha]"
 COPY --from=ui /ui/dist ./frontend/dist
 RUN useradd --create-home --uid 10001 tradelens && chown -R tradelens /app
 USER tradelens

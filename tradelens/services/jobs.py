@@ -25,7 +25,7 @@ from ..config import Settings
 from ..data.base import DataProvider
 from ..data.sources import HistorySource
 from ..domain import Mode
-from ..models import JobRunRow, SignalRow
+from ..models import EquitySnapshotRow, JobRunRow, SignalRow
 from ..risk.engine import RiskEngine
 from . import ingest
 from .alerts import Alert, Notifier
@@ -46,7 +46,16 @@ def build_pipeline(s: Session, settings: Settings, provider: DataProvider, broke
     mode = mode or Mode(settings.mode)
     return Pipeline(s, provider, broker, risk=risk, mode=mode, starting_capital=settings.starting_capital,
                     require_fit=require_fit, notifier=notifier, gate=GateConfig.from_settings(settings, mode),
-                    benchmark=settings.benchmark_symbol, stale_check=True)
+                    benchmark=settings.benchmark_symbol, stale_check=True, filters=build_filters(settings))
+
+
+def build_filters(settings: Settings) -> list:
+    out: list = []
+    if settings.events_file:
+        from .filters import EventBlackoutFilter, load_events
+        out.append(EventBlackoutFilter(load_events(settings.events_file), settings.event_blackout_days,
+                                       enforced=settings.filters_enforced))
+    return out
 
 
 def stale_symbols(provider: DataProvider, symbols: list[str], expected: date) -> list[str]:
@@ -98,11 +107,19 @@ def run_daily(sf: sessionmaker[Session], settings: Settings, provider: DataProvi
         if stale:
             detail["warnings"].append(f"{len(stale)} symbol(s) skipped, stale data: {', '.join(stale[:10])}")
 
-        # 3) exits first: they free slots and cash for the scan
+        # 3) the broker is the source of truth: compare, then exits first (they free slots and cash for the scan)
         with sf() as s:
-            pipe = build_pipeline(s, settings, provider, broker, risk, notifier)
-            closed = pipe.check_exits()
-            advice = pipe.review_positions()      # strategy opinions (EXIT / REDUCE) on what is still open; advice only
+            pipe0 = build_pipeline(s, settings, provider, broker, risk, notifier)
+            try:
+                mismatches = pipe0.reconcile()
+            except Exception as e:  # noqa: BLE001 - an unreadable broker must not hide behind a quiet job
+                mismatches = [f"reconciliation failed: {type(e).__name__}: {str(e)[:200]}"]
+                notifier.send(Alert("critical", "Could not reconcile with the broker", mismatches[0]))
+            detail["reconcile"] = mismatches
+            if mismatches:
+                detail["warnings"].append(f"{len(mismatches)} position mismatch(es) with the broker")
+            closed = pipe0.check_exits()
+            advice = pipe0.review_positions()      # strategy opinions (EXIT / REDUCE) on what is still open; advice only
             detail["advice"] = [{"symbol": a.symbol, "action": a.action, "reason": a.reason} for a in advice]
             detail["exits"] = [{"symbol": p.symbol, "reason": p.exit_reason, "pnl": round(p.pnl or 0.0, 2)} for p in closed]
             for p in closed:
@@ -143,6 +160,13 @@ def run_daily(sf: sessionmaker[Session], settings: Settings, provider: DataProvi
             detail["warnings"].append(f"{st.unpriced_positions} open position(s) have no price; equity marks them at entry")
         detail["account"] = {"equity": round(st.equity, 2), "unrealized_pnl": round(st.unrealized_pnl, 2),
                              "open_positions": st.open_positions}
+        with sf() as s:                      # the paper/live equity curve the review compares with the backtest
+            day = datetime.combine(expected_last_bar(now, holidays), datetime.min.time())
+            snap = s.query(EquitySnapshotRow).filter_by(day=day).one_or_none() or EquitySnapshotRow(day=day, equity=0.0)
+            snap.equity, snap.unrealized_pnl, snap.exposure, snap.open_positions = (
+                st.equity, st.unrealized_pnl, st.exposure, st.open_positions)
+            s.add(snap)
+            s.commit()
 
         summary = (f"{len(new)} new signal(s): {len(proposed)} awaiting approval, {len(executed)} executed, "
                    f"{len(gated)} held back by the gate, {sum(rejected.values())} rejected. {len(closed)} position(s) closed. "

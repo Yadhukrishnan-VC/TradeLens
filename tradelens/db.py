@@ -66,3 +66,7 @@ def make_session_factory(engine: Engine) -> sessionmaker[Session]:
     Base.metadata.create_all(engine)
     upgrade_schema(engine)
     return sessionmaker(engine, expire_on_commit=False)
+
+
+# smc-branch name, kept so code and tests written against it keep working
+add_missing_columns = upgrade_schema

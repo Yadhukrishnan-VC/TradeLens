@@ -51,7 +51,9 @@ class OrderRow(Base):
     side: Mapped[str] = mapped_column(String(4))
     qty: Mapped[int] = mapped_column(Integer)
     price: Mapped[float | None] = mapped_column(Float, nullable=True)   # fill price once filled
-    status: Mapped[str] = mapped_column(String(20))  # PENDING_APPROVAL|FILLED|REJECTED|CANCELLED
+    status: Mapped[str] = mapped_column(String(20))  # PENDING_APPROVAL|SUBMITTED|FILLED|REJECTED|CANCELLED|UNCERTAIN
+    broker_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)   # set while/after the broker holds it
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     mode: Mapped[str] = mapped_column(String(16))
     tag: Mapped[str] = mapped_column(String(20), unique=True)
     reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -78,6 +80,12 @@ class PositionRow(Base):
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     exit_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
     pnl: Mapped[float | None] = mapped_column(Float, nullable=True)     # net of all costs, once closed
+    broker_stop_id: Mapped[str | None] = mapped_column(String(64), nullable=True)   # exchange-side stop (GTT), if placed
+    signal_entry: Mapped[float | None] = mapped_column(Float, nullable=True)        # the price the signal assumed
+    exit_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)    # exit sent, fill not confirmed yet
+    exit_pending_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    exit_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
 
 
 class BacktestRunRow(Base):
@@ -157,6 +165,38 @@ class JobRunRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="running")   # running | ok | failed
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class EquitySnapshotRow(Base):
+    """One row per trading day, written by the daily job: the paper/live equity curve."""
+    __tablename__ = "equity_snapshots"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    day: Mapped[datetime] = mapped_column(DateTime, unique=True, index=True)
+    equity: Mapped[float] = mapped_column(Float)
+    unrealized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    exposure: Mapped[float] = mapped_column(Float, default=0.0)
+    open_positions: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class BrokerSessionRow(Base):
+    """Zerodha access token (valid until ~06:00 IST next day). A secret: never returned by the API or logged."""
+    __tablename__ = "broker_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    broker: Mapped[str] = mapped_column(String(16), unique=True)
+    access_token: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class FilterLogRow(Base):
+    """Every verdict of every signal filter, including shadow-mode ones that did not block anything."""
+    __tablename__ = "filter_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"), index=True)
+    filter: Mapped[str] = mapped_column(String(40))
+    verdict: Mapped[str] = mapped_column(String(10))          # allow | veto
+    enforced: Mapped[bool] = mapped_column(default=False)      # False = shadow: logged only
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
 
 
 class TrialsRow(Base):

@@ -22,6 +22,8 @@ export function Desk({ refreshKey, onChange }: { refreshKey: number; onChange: (
       const o = kind === "approve" ? await api.approve(id) : await api.reject(id);
       if (o.status === "FILLED") {
         setNotice({ tone: "ok", text: `${o.side === "BUY" ? "Bought" : "Sold"} ${o.qty} ${o.symbol} at ${inr(o.price, 2)} (paper).` });
+      } else if (o.status === "SUBMITTED") {
+        setNotice({ tone: "ok", text: `Order for ${o.qty} ${o.symbol} is with the broker. It fills at the next session's open; the daily run records the fill.` });
       } else if (o.status === "CANCELLED") {
         setNotice({ tone: "ok", text: `Rejected ${o.symbol}. Nothing was sent to the broker.` });
       } else {

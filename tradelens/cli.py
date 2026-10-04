@@ -38,6 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("test-alert", help="send a test alert to every configured channel")
     sub.add_parser("token", help="print a new random API token for API_TOKEN")
     sub.add_parser("migrate", help="create the database schema or add any missing columns (safe to repeat)")
+    sub.add_parser("kite-login", help="daily Zerodha login: prints the login URL, then stores today's access token")
+    sub.add_parser("kite-check", help="verify the Zerodha session, funds and (dry-run) order path WITHOUT placing anything")
+    rv = sub.add_parser("review", help="paper trading vs the backtest replay (needs the daily job to have run for a while)")
+    rv.add_argument("--start", help="YYYY-MM-DD (default: first equity snapshot)")
+    rv.add_argument("--benchmark", default="NIFTYBEES")
     ft = sub.add_parser("fetch", help="download daily history from a free provider into the database")
     ft.add_argument("--symbols", help="comma-separated NSE symbols (default: a liquid large-cap list)")
     ft.add_argument("--years", type=float, default=5.0)
@@ -114,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{filename}: {len(uni.symbols)} symbols, {n_rows} membership rows - valid. "
               f"Use it with: python -m tradelens portfolio --universe-file {filename}")
         return 0
-    if a.cmd in ("worker", "run-daily", "test-alert"):
+    if a.cmd in ("worker", "run-daily", "test-alert", "kite-login", "kite-check", "review"):
         return _ops(a)
 
     if a.cmd == "strategies":
@@ -190,17 +195,16 @@ def _portfolio(a) -> int:
 def _ops(a) -> int:
     import logging
 
-    from .broker.paper import PaperBroker
     from .risk.engine import RiskEngine
     from .services.alerts import Alert, build_notifier
     from .services.jobs import run_daily, worker_loop
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = get_settings()
-    if settings.broker != "paper":
-        raise SystemExit("Only BROKER=paper is implemented.")
     sf = make_session_factory(make_engine(settings.database_url))
     notifier = build_notifier(settings, sf)
+    if a.cmd == "kite-login":
+        return _kite_login(settings, sf)
     if a.cmd == "test-alert":
         ok = notifier.send(Alert("info", "Test alert", "If you can read this, alerts work."))
         print("delivered to an external channel" if ok else "NOT delivered externally (check TELEGRAM_* / ALERT_WEBHOOK_URL); saved to the alerts table")
@@ -213,7 +217,13 @@ def _ops(a) -> int:
         from .data.db_provider import DbProvider
         provider = DbProvider(sf)
     source = None if (settings.demo or settings.data_source != "db" or getattr(a, "no_fetch", False)) else get_source("yahoo")
-    risk, broker = RiskEngine(), PaperBroker()
+    risk = RiskEngine()
+    if a.cmd == "review":
+        return _review(sf, provider, settings, risk, a)
+    from .broker.factory import build_broker
+    broker = build_broker(settings, sf, provider)
+    if a.cmd == "kite-check":
+        return _kite_check(settings, broker)
     if a.cmd == "run-daily":
         res = run_daily(sf, settings, provider, broker, risk, notifier, source=source)
         print(f"daily run {res['run_id']}: {res['status']}")
@@ -222,4 +232,73 @@ def _ops(a) -> int:
                 print(f"  {k}: {res[k]}")
         return 0 if res["status"] == "ok" else 1
     worker_loop(sf, settings, provider, broker, risk, notifier, source)
+    return 0
+
+
+def _kite_login(settings, sf) -> int:
+    from .broker.zerodha import complete_login, kite_login_url, validate_live_settings
+    validate_live_settings(settings)
+    print("1. Open this URL, log in (with your 2FA), and let it redirect:\n\n   " + kite_login_url(settings.zerodha_api_key))
+    print("\n2. Copy the request_token from the address bar (or paste the whole redirected URL).")
+    try:
+        user = complete_login(sf, settings.zerodha_api_key, settings.zerodha_api_secret, input("\nrequest_token or URL: "))
+    except Exception as e:  # noqa: BLE001
+        print(f"login failed: {type(e).__name__}: {str(e)[:200]}")
+        return 1
+    print(f"logged in as {user}. The token is stored and is valid until about 06:00 IST tomorrow.")
+    return 0
+
+
+def _kite_check(settings, broker) -> int:
+    from .broker.zerodha import ZerodhaBroker
+    if not isinstance(broker, ZerodhaBroker):
+        print("BROKER is not zerodha: nothing to check.")
+        return 1
+    kite = broker._kite()
+    try:
+        who = broker._call(kite.profile)
+        funds = broker._call(kite.margins, "equity")
+    except Exception as e:  # noqa: BLE001
+        print(f"FAILED: {e}")
+        return 1
+    print(f"session ok: {who.get('user_id')} ({who.get('user_name', '')})")
+    print(f"equity segment cash available: {funds.get('available', {}).get('live_balance', 'n/a')}")
+    print(f"dry run: {'YES, no order will be sent' if broker.dry_run else 'NO, REAL ORDERS WILL BE SENT'}; "
+          f"caps: {broker.max_order_value:,.0f} per BUY order, {broker.max_daily_value:,.0f} per day")
+    print("This did not place any order. Your static IP is only validated when an order is placed, so the first "
+          "real order is also the IP test: use the smallest size.")
+    return 0
+
+
+def _review(sf, provider, settings, risk, a) -> int:
+    from .services import paper_review
+    try:
+        r = paper_review.review(sf, provider, settings, risk=risk, start=a.start, benchmark=a.benchmark)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"cannot review yet: {e}")
+        return 1
+    f = lambda v, d=1: "n/a" if v is None else f"{v:,.{d}f}"  # noqa: E731
+    print(f"Paper vs backtest replay, {r['window'][0]} -> {r['window'][1]} ({r['trading_days']} trading days)")
+    print(f"  implementation matches the model: {r['implementation_ok']}")
+    for c in r["checks"]:
+        mark = {True: "PASS", False: "FAIL", None: " n/a"}[c["ok"]]
+        print(f"   [{mark}] {c['check']}: {f(c['value'], 3)}   ({c['rule']})")
+    t = r["tracking"]
+    if "live_return_pct" in t:
+        print(f"  return: paper {f(t['live_return_pct'])}%  replay {f(t['backtest_return_pct'])}%  gap {f(t['gap_pp'])}pp"
+              + (f"  benchmark {f(t['benchmark_return_pct'])}%" if "benchmark_return_pct" in t else ""))
+    sg = r["signals"]
+    print(f"  signals: replay {sg['backtest_signals']}, live {sg['live_signals']}, matched {sg['matched']}; missing live: {len(sg['missing_live'])}")
+    for m in sg["missing_live"][:5]:
+        print(f"     missing {m['strategy']} {m['symbol']} {m['day']}: {m['likely_cause']}")
+    tr = r["trades"]
+    print(f"  trades: {tr['live_closed']} closed, {tr['live_open']} open; median entry gap vs backtest fill {f(tr['entry_gap_bps_median'])} bps")
+    if tr["live"]["win_rate_95ci"]:
+        lo, hi = tr["live"]["win_rate_95ci"]
+        print(f"  live win rate {f(tr['live']['win_rate'] and tr['live']['win_rate'] * 100, 0)}% (95% interval {lo * 100:.0f}%-{hi * 100:.0f}%)")
+    print("  " + r["edge_evidence"]["statement"])
+    for name, fl in r["filters"].items():
+        print(f"  filter {name}: {fl['vetoes']} vetoes ({'enforced' if fl['enforced'] else 'shadow'}); {fl['verdict']}")
+    ops = r["operations"]
+    print(f"  operations: daily job ok on {ops['days_with_ok_run']}/{ops['trading_days']} days; failed runs {ops['failed_runs']}; critical alerts {len(ops['critical_alerts'])}")
     return 0

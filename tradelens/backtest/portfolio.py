@@ -46,6 +46,7 @@ class PortfolioResult:
     start: pd.Timestamp
     end: pd.Timestamp
     notes: list[str] = field(default_factory=list)
+    signals: list[tuple[pd.Timestamp, str, str]] = field(default_factory=list)   # every candidate: (bar, strategy, symbol)
 
 
 @dataclass
@@ -110,6 +111,7 @@ def run_portfolio_backtest(
     curve, expo = np.empty(n), np.zeros(n)
     max_open = 0
     n_signals = 0
+    sig_log: list[tuple[pd.Timestamp, str, str]] = []
 
     def skip(reason: str) -> None:
         skipped[reason] = skipped.get(reason, 0) + 1
@@ -183,6 +185,7 @@ def run_portfolio_backtest(
                     if sig is not None:
                         cands.append((-sd.liq[i], k, sym, sig))
             n_signals += len(cands)
+            sig_log.extend((ts, strategies[k].meta.name, sym) for _, k, sym, _s in cands)
             cands.sort(key=lambda x: x[:3])
             pending = [(sym, sig) for _, _, sym, sig in cands]
 
@@ -200,4 +203,4 @@ def run_portfolio_backtest(
         strategies=names, symbols=sorted(frames), trades=trades, equity_curve=series,
         exposure=pd.Series(expo, index=calendar), metrics=metrics,
         by_strategy={nm: compute_metrics([t for t in trades if t.strategy == nm]) for nm in names},
-        skipped=skipped, capital=capital, start=calendar[0], end=calendar[-1])
+        skipped=skipped, capital=capital, start=calendar[0], end=calendar[-1], signals=sig_log)

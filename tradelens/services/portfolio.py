@@ -51,7 +51,7 @@ def run_portfolio(
     capital: float = 100_000.0,
     start: str | None = None,
     end: str | None = None,
-    benchmark: str = DEFAULT_BENCHMARK,
+    benchmark: str | None = DEFAULT_BENCHMARK,
     universe_file: Path | None = None,
     liquid_top_n: int | None = None,
     risk: RiskEngine | None = None,
@@ -69,9 +69,10 @@ def run_portfolio(
         requested = sorted({s.strip().upper() for s in symbols if s.strip()})
         frames = {s: provider.get_bars(s) for s in requested}          # explicit list: a missing one is an error
     else:
-        requested = sorted(interval.symbols if interval else available - {benchmark.upper()})
+        requested = sorted(interval.symbols if interval else available - {(benchmark or '').upper()})
         frames = {s: provider.get_bars(s) for s in requested if s in available}
-    frames.pop(benchmark.upper(), None)                                 # never trade the benchmark itself
+    if benchmark:
+        frames.pop(benchmark.upper(), None)                             # never trade the benchmark itself
     if not frames:
         raise FileNotFoundError("no price data for any requested symbol. Fetch history first.")
 
@@ -83,11 +84,12 @@ def run_portfolio(
     res = run_portfolio_backtest(strategies, frames, capital=capital, risk=risk, cost_model=cost_model,
                                  slippage_bps=slippage_bps, universe=universe, start=start, end=end)
     calendar = res.equity_curve.index
-    bench_curve = buy_and_hold_curve(provider.get_bars(benchmark.upper()), calendar, capital, slippage_bps=slippage_bps)
+    bench_curve = (buy_and_hold_curve(provider.get_bars(benchmark.upper()), calendar, capital, slippage_bps=slippage_bps)
+                   if benchmark else None)
     ew_curve = equal_weight_curve(frames, calendar, capital, universe)
     comparison = {
-        "benchmark_symbol": benchmark.upper(),
-        "vs_benchmark": compare(res.equity_curve, bench_curve, capital, risk_free),
+        "benchmark_symbol": benchmark.upper() if benchmark else None,
+        "vs_benchmark": compare(res.equity_curve, bench_curve, capital, risk_free) if bench_curve is not None else None,
         "vs_equal_weight_universe": compare(res.equity_curve, ew_curve, capital, risk_free),
         "avg_exposure_pct": res.metrics["avg_exposure_pct"],
         "notes": [
@@ -101,9 +103,9 @@ def run_portfolio(
     }
     report = survivorship_report(frames, universe, res.start, res.end, requested=requested)
     extra = {"comparison": comparison, "survivorship": report,
-             "curves": {"strategy": res.equity_curve, "benchmark": bench_curve, "equal_weight": ew_curve,
-                        "exposure": res.exposure},
-             "settings": {"slippage_bps": slippage_bps, "benchmark": benchmark.upper(), "risk_free": risk_free,
+             "curves": {k: v for k, v in {"strategy": res.equity_curve, "benchmark": bench_curve,
+                                          "equal_weight": ew_curve, "exposure": res.exposure}.items() if v is not None},
+             "settings": {"slippage_bps": slippage_bps, "benchmark": benchmark.upper() if benchmark else None, "risk_free": risk_free,
                           "universe": report["universe"], "liquid_top_n": liquid_top_n,
                           "risk_config": asdict(risk.cfg) if risk else None}}
     return res, extra
@@ -114,7 +116,8 @@ def run_and_store(session: Session, provider: DataProvider, **kw: Any) -> dict:
     curves = extra["curves"]
     stored_curves = {"dates": [d.date().isoformat() for d in res.equity_curve.index],
                      **{k: [round(float(v), 4) for v in s.to_numpy()] for k, s in curves.items()}}
-    trades = [{**asdict(t), "entry_ts": t.entry_ts.isoformat(), "exit_ts": t.exit_ts.isoformat()} for t in res.trades]
+    trades = [{**asdict(t), "entry_ts": t.entry_ts.isoformat(), "exit_ts": t.exit_ts.isoformat(),
+               "signal_ts": t.signal_ts.isoformat() if t.signal_ts else None} for t in res.trades]
     row = PortfolioRunRow(
         strategies=res.strategies, symbols=res.symbols, capital=res.capital,
         start=res.start.to_pydatetime(), end=res.end.to_pydatetime(), settings=_clean(extra["settings"]),

@@ -127,8 +127,8 @@ def test_no_old_project_name_left_in_tracked_text():
 
 # ---- packaging / deployment ----
 def test_every_third_party_import_is_a_declared_dependency():
-    declared = {re.split(r"[<>=\[ ]", d.strip().strip('",'))[0].lower().replace("_", "-")
-                for d in re.findall(r'^\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(), re.M)}
+    text = (ROOT / "pyproject.toml").read_text()      # main dependencies AND the optional extras (e.g. zerodha)
+    declared = {m.lower().replace("_", "-") for m in re.findall(r'"([A-Za-z0-9_.\-]+)(?:\[[^\]]*\])?\s*[<>=!~]', text)}
     aliases = {"sklearn": "scikit-learn", "yaml": "pyyaml", "psycopg": "psycopg"}
     stdlib, local = set(sys.stdlib_module_names), {"tradelens", "conftest"}
     missing = set()

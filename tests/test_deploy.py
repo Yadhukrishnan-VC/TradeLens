@@ -39,7 +39,7 @@ def test_docker_compose_required_api_token():
             f"API_TOKEN not configured in {svc} service of docker-compose.yml"
         )
         # the value must contain the ?fail guard (not a bare value)
-        assert "${API_TOKEN?" in api_token_line, (
+        assert "${API_TOKEN?" in api_token_line or "${API_TOKEN:?" in api_token_line, (
             f"API_TOKEN in {svc} is not a required guard; value={api_token_line}"
         )
 

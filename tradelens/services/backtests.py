@@ -54,7 +54,8 @@ def run_and_store(
     res = fit["result"]
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     trades = [
-        {**asdict(t), "entry_ts": t.entry_ts.isoformat(), "exit_ts": t.exit_ts.isoformat()}
+        {**asdict(t), "entry_ts": t.entry_ts.isoformat(), "exit_ts": t.exit_ts.isoformat(),
+         "signal_ts": t.signal_ts.isoformat() if t.signal_ts else None}
         for t in res.trades
     ]
     detail = {k: fit[k] for k in ("all", "early", "late", "split_at", "skipped")}

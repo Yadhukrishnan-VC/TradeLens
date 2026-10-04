@@ -14,9 +14,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from ..broker.base import Broker
-from ..broker.paper import PaperBroker
 from ..config import Settings, get_settings
 from ..data.base import DataProvider, DataQualityError
+from ..broker.factory import build_broker
 from ..data.csv_provider import CsvProvider
 from ..data.db_provider import DbProvider
 from ..data.live import LiveSource, YahooLive
@@ -142,8 +142,6 @@ def create_app(
     start_live: bool = True,
 ) -> FastAPI:
     settings = settings or get_settings()
-    if settings.broker != "paper":
-        raise RuntimeError("Only BROKER=paper is implemented. Live Zerodha is deliberately not built yet.")
     sf = session_factory or make_session_factory(make_engine(settings.database_url))
     if provider is None:
         if settings.demo:
@@ -152,7 +150,7 @@ def create_app(
             provider = CsvProvider(settings.data_dir)
         else:
             provider = DbProvider(sf)
-    broker = broker or PaperBroker()
+    broker = broker or build_broker(settings, sf, provider)
     risk = risk or RiskEngine()
 
     if live_source is None and not settings.demo:
@@ -519,6 +517,18 @@ def create_app(
             raise HTTPException(404, str(e)) from e
         except ValueError as e:
             raise HTTPException(409, str(e)) from e
+
+    @app.post("/orders/sync")
+    def sync_orders(s=Depends(session_dep)):
+        return [_row(o) for o in pipe(s).sync_orders()]
+
+    @app.get("/paper-review")
+    def paper_review(start: str | None = None, benchmark: str = portfolio_svc.DEFAULT_BENCHMARK, s=Depends(session_dep)):
+        from ..services import paper_review as pr
+        try:
+            return pr.review(sf, provider, settings, risk=risk, start=start, benchmark=benchmark)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.post("/orders/{order_id}/reject")
     def reject(order_id: int, s=Depends(session_dep)):
